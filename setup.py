@@ -1,9 +1,7 @@
-import os
-
 from setup_utils import include_directory
 from setuptools import find_packages, setup
 
-package_name = "ros2_example_package"
+package_name = "object_detection_lidar"
 
 setup(
     name=package_name,
@@ -13,11 +11,11 @@ setup(
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
         *include_directory(
-            install_path=os.path.join("share", package_name, "config"),
+            install_path=f"share/{package_name}/config",
             source_path="config",
         ),
         *include_directory(
-            install_path=os.path.join("share", package_name, "launch"),
+            install_path=f"share/{package_name}/launch",
             source_path="launch",
         ),
     ],
@@ -25,8 +23,8 @@ setup(
     zip_safe=True,
     maintainer="Smart Rollerz",
     maintainer_email="info@dhbw-smartrollerz.org",
-    description="TODO: Package description",
-    license="TODO: License declaration",
+    description="LiDAR-based obstacle detection for the Smarty vehicle",
+    license="MIT",
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [

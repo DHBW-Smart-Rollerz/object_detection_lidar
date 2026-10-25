@@ -14,4 +14,4 @@ jobs:
     uses: DHBW-Smart-Rollerz/smarty_workspace/.github/workflows/build-reusable.yaml@jazzy
     with:
       type: 'python'
-      package_name: 'ros2_example_package'
+      package_name: 'object_detection_lidar'

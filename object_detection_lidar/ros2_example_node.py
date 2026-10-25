@@ -1,11 +1,12 @@
 import cv_bridge
 import rclpy
+import rclpy.utilities
 import sensor_msgs.msg
 from smarty_utils.enums import NodeState
 from smarty_utils.smarty_node import SmartyNode
 from timing import timer
 
-from ros2_example_package.example_model import model
+from object_detection_lidar.example_model import model
 
 
 class ROS2ExampleNode(SmartyNode):
@@ -15,7 +16,7 @@ class ROS2ExampleNode(SmartyNode):
         """Initialize the ROS2ExampleNode."""
         super().__init__(
             "ros2_example_node",
-            "ros2_example_package",
+            "object_detection_lidar",
             node_parameters={
                 # Subscriber topics
                 "image_subscriber": "/camera/undistorted",
@@ -68,18 +69,17 @@ class ROS2ExampleNode(SmartyNode):
             root=self.package_path, model_config_path=self.model_config_path
         )
 
-    def image_callback(self, msg: sensor_msgs.msg.Image):
+    def image_callback(self, msg: sensor_msgs.msg.Image) -> None:
         """Executed by the ROS2 system whenever a new image is received."""
         # Execute the prediction
         self.execute_prediction(msg)
 
     @timer.Timer(name="total", filter_strength=40)
-    def execute_prediction(self, msg: sensor_msgs.msg.Image):
-        """
-        Execute the prediction.
+    def execute_prediction(self, msg: sensor_msgs.msg.Image) -> None:
+        """Execute the prediction.
 
-        Arguments:
-            msg -- The image message.
+        Args:
+            msg: The image message.
         """
         with timer.Timer(name="msg_transport", filter_strength=40):
             # The image has to be retrieved from the message
@@ -107,12 +107,11 @@ class ROS2ExampleNode(SmartyNode):
         timer.Timer(logger=self.get_logger().info).print()  # type: ignore
 
 
-def main(args=None):
-    """
-    Main function to start the LaneDetectionNode.
+def main(args: list[str] | None = None) -> None:
+    """Main function to start the LaneDetectionNode.
 
-    Keyword Arguments:
-        args -- Launch arguments (default: {None})
+    Args:
+        args: Launch arguments (default: None)
     """
     rclpy.init(args=args)
     node = ROS2ExampleNode()
@@ -131,7 +130,7 @@ def main(args=None):
     try:
         use_wait_for_message = True
         if use_wait_for_message:
-            while rclpy.ok():
+            while rclpy.utilities.ok():
                 rclpy.spin_once(node)
         else:
             rclpy.spin(node)
@@ -143,7 +142,7 @@ def main(args=None):
         node.destroy_node()
 
         # Shutdown if not already done by the ROS2 launch system
-        if rclpy.ok():
+        if rclpy.utilities.ok():
             rclpy.shutdown()
 
 
