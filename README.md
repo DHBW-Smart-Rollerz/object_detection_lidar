@@ -10,8 +10,20 @@ Clone the package into `~/smarty_workspace/src`, then build and launch it:
 
 ```bash
 make build PKG=object_detection_lidar
-ros2 launch object_detection_lidar ros2_example.launch.py
+ros2 launch object_detection_lidar object_detection_lidar.launch.py
 ```
+
+## Node
+
+`object_detection_lidar_node` subscribes to the 2D laser scan, drops invalid points and points outside `[min_range, max_range]` and publishes the remaining points as point cloud in the frame of the scan. The point cloud can be shown in RViz (display type `PointCloud2`).
+
+| Parameter | Default | Description |
+| --- | --- | --- |
+| `scan_subscriber` | `/scan` | Input topic (`sensor_msgs/LaserScan`) |
+| `points_publisher` | `/object_detection_lidar/points` | Output topic (`sensor_msgs/PointCloud2`) |
+| `min_range` | `0.15` | Closer points are ignored, in m |
+| `max_range` | `4.0` | Farther points are ignored, in m |
+| `debug` | `False` | Logs the number of valid points and the processing times |
 
 ## Structure
 
@@ -21,7 +33,6 @@ ros2 launch object_detection_lidar ros2_example.launch.py
   - `lint.yaml`: Checks the code with ruff (Python) and ament_uncrustify (C++)
 - `config/`: All configurations (most of the time yaml files)
 - `launch/`: Contains all launch files. Launch files can start multiple nodes with yaml-configurations
-- `models/`: Contains all models (optional) and only necessary for machine learning nodes
 - `resource/`: Contains the package name (required to build with colcon)
 - `object_detection_lidar`: Contains all nodes and sources for the ros package
 - `test/`: Contains all tests

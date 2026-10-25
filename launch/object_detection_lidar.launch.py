@@ -33,8 +33,8 @@ def generate_launch_description() -> LaunchDescription:
             Node(
                 package="object_detection_lidar",
                 namespace="",  # Is also the namespace for loading the params
-                executable="ros2_example_node",
-                name="ros2_example_node",
+                executable="object_detection_lidar_node",
+                name="object_detection_lidar_node",
                 parameters=[
                     {"debug": debug},
                     params_file,

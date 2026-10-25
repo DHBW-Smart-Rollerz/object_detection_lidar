@@ -28,7 +28,8 @@ setup(
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
-            f"ros2_example_node = {package_name}.ros2_example_node:main",
+            "object_detection_lidar_node = "
+            f"{package_name}.object_detection_lidar_node:main",
         ],
     },
 )
