@@ -4,7 +4,25 @@ object_detection_lidar_node:
     # Topics
     scan_subscriber: "/scan"
     points_publisher: "/object_detection_lidar/points"
+    markers_publisher: "/object_detection_lidar/markers"
 
     # Valid range of the scan points (additionally limited by the sensor itself)
     min_range: 0.15 # in m, closer points are ignored (e.g. car body)
     max_range: 4.0 # in m, farther points are ignored
+
+    # Clustering (DBSCAN)
+    # Max. distance of two neighboring points of the same object. The RPLIDAR A2M12
+    # has an angle_increment of 0.00348 rad, i.e. ~14 mm point spacing at 4 m.
+    # eps is clearly above that (plus measurement noise) and clearly below the
+    # min. distance of 1 m between obstacles, so two obstacles are not merged.
+    # The 1 m only applies along the track, obstacles can stand closer when
+    # parallel parking and may then be merged.
+    eps: 0.10 # in m
+    # Min. number of points in the neighborhood of a core point (incl. itself),
+    # single outliers are treated as noise
+    min_samples: 3
+    # Objects with a larger diameter (largest distance of two points, independent
+    # of the rotation) are dropped (simple wall filter). CAuDri only specifies the
+    # width of obstacles (100 to 400 mm), the length is open. 0.6 m is a
+    # preliminary value and still has to be justified.
+    max_object_diameter: 0.6 # in m
