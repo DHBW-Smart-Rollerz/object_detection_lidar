@@ -148,3 +148,19 @@ def test_single_point_cluster():
     assert len(single) == 1
     assert single[0].diameter == 0.0
     assert filter_objects(objects, 0.6) == objects
+
+
+def test_objects_keep_their_points():
+    first = make_group(1.0, 0.0)
+    second = make_group(1.0, 1.0, num=7)
+    points = np.vstack((second, first))
+
+    objects = extract_objects(points, cluster_points(points, EPS, MIN_SAMPLES))
+    filtered = filter_objects(objects, 0.6)
+
+    assert sorted(len(obj.points) for obj in filtered) == [5, 7]
+    for obj in filtered:
+        assert len(obj.points) == obj.num_points
+        np.testing.assert_allclose(
+            obj.points.mean(axis=0), (obj.centroid_x, obj.centroid_y)
+        )

@@ -5,6 +5,9 @@ object_detection_lidar_node:
     scan_subscriber: "/scan"
     points_publisher: "/object_detection_lidar/points"
     markers_publisher: "/object_detection_lidar/markers"
+    # One point per object (centroid) with the fields extent_x, extent_y, diameter
+    # and is_box (1.0 box, 0.0 other), input of the fusion
+    objects_publisher: "/object_detection_lidar/objects"
 
     # Valid range of the scan points (additionally limited by the sensor itself)
     min_range: 0.15 # in m, closer points are ignored (e.g. car body)
@@ -26,3 +29,24 @@ object_detection_lidar_node:
     # width of obstacles (100 to 400 mm), the length is open. 0.6 m is a
     # preliminary value and still has to be justified.
     max_object_diameter: 0.6 # in m
+
+    # Box classification (is_box), see box_classification.py
+    # Max. RMS distance of the points to a box side: box_line_tolerance at 0 m plus
+    # box_line_tolerance_per_m per m of distance. The range noise of the A2M12 in the
+    # rosbags of 03/11/2026 grows with the distance (median ~0.4 mm + 1.4 mm/m,
+    # 90th percentile ~2.7 mm/m). A larger value (2.5 mm/m) finds more frontal boxes
+    # at 3-4 m, but in hand-labelled scans of these rosbags it added 2 true boxes and
+    # 24 false ones (straight edges of furniture and walls), so 1.5 mm/m is kept.
+    box_line_tolerance: 0.0023 # in m
+    box_line_tolerance_per_m: 0.0015 # in m/m
+    # Max. deviation of a corner from 90°
+    box_angle_tolerance: 10.0 # in deg
+    # Factor on the line tolerance for the sides of a corner (a right angle rarely
+    # occurs by chance, so the sides may be noisier)
+    box_corner_tolerance_factor: 2.5
+    # Min. distance between the outermost points, below the min. obstacle width of
+    # 0.1 m (CAuDri), small fragments are almost always straight
+    box_min_size: 0.08 # in m
+    # Min. ratio of points to beams within the angular span, a box is a closed
+    # surface (drops sparse clusters like chair legs)
+    box_min_fill_ratio: 0.7

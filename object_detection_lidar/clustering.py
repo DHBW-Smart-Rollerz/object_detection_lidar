@@ -1,6 +1,6 @@
 """Clustering of 2D points into obstacle candidates (independent of ROS)."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 from scipy.spatial.distance import pdist
@@ -13,7 +13,8 @@ class DetectedObject:
 
     All values are in m and given in the scan frame. The diameter is the largest
     distance between two points of the cluster and, unlike the box, does not depend
-    on the rotation of the object.
+    on the rotation of the object. The points of the cluster are kept, so later
+    steps (e.g. the box classification) work on exactly the same cluster.
     """
 
     centroid_x: float
@@ -24,6 +25,9 @@ class DetectedObject:
     max_y: float
     num_points: int
     diameter: float
+    # Array of shape (num_points, 2), not compared, so objects can still be compared
+    # by their values (numpy arrays have no single truth value)
+    points: np.ndarray = field(compare=False, repr=False)
 
     @property
     def extent_x(self) -> float:
@@ -91,6 +95,7 @@ def extract_objects(points: np.ndarray, labels: np.ndarray) -> list[DetectedObje
                 # Single-point clusters are possible with min_samples = 1, pdist
                 # then returns an empty array and the diameter is 0
                 diameter=float(pdist(cluster).max(initial=0.0)),
+                points=cluster,
             )
         )
     return objects
