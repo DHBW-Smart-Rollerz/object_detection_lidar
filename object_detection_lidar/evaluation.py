@@ -320,7 +320,10 @@ def match_nearest(
 
 
 def score_labels(
-    scans: Sequence[ScanObjects], labels: Labels, match_radius: float
+    scans: Sequence[ScanObjects],
+    labels: Labels,
+    match_radius: float,
+    field_of_view: Region | None = None,
 ) -> LabelScore:
     """Compare the box classification with the hand labels.
 
@@ -330,10 +333,16 @@ def score_labels(
     missed (like the boxes labelled without a cluster). Every box in the region
     that matches no labelled box is a false positive.
 
+    With field_of_view, the region is the intersection of the labelled region and
+    the field of view: detected objects and labelled boxes outside of it are
+    ignored. Labelled boxes without a cluster have no position and always count.
+
     Args:
         scans: The objects of all scans of the bag
         labels: The hand labels of the bag
         match_radius: Max. distance between a labelled and a detected centroid in m
+        field_of_view: Additional restriction of the region, e.g. the field of
+            view of the camera the labels were made with
 
     Returns:
         The counts of the comparison.
@@ -344,15 +353,19 @@ def score_labels(
             raise ValueError(f"Labelled scan {labelled.scan} is not in the bag")
         scan = scans[labelled.scan]
         in_region = labels.region.contains(scan.centroids)
+        labelled_boxes = labelled.boxes
+        if field_of_view is not None:
+            in_region &= field_of_view.contains(scan.centroids)
+            labelled_boxes = labelled_boxes[field_of_view.contains(labelled_boxes)]
         centroids = scan.centroids[in_region]
         boxes = scan.boxes[in_region]
 
-        pairs = match_nearest(labelled.boxes, centroids, match_radius)
+        pairs = match_nearest(labelled_boxes, centroids, match_radius)
         matched = {j for _, j in pairs}
         hits = sum(bool(boxes[j]) for _, j in pairs)
         tp += hits
         fn += len(pairs) - hits
-        missed += labelled.missed_boxes + len(labelled.boxes) - len(pairs)
+        missed += labelled.missed_boxes + len(labelled_boxes) - len(pairs)
         fp += sum(bool(box) for j, box in enumerate(boxes) if j not in matched)
     return LabelScore(
         true_positives=tp, false_negatives=fn, missed=missed, false_positives=fp

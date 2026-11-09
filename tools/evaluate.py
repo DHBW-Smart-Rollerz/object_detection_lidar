@@ -13,7 +13,7 @@ import sys
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from pathlib import Path
 
 import numpy as np
@@ -25,6 +25,8 @@ sys.path.insert(0, str(PACKAGE_DIR))
 
 from object_detection_lidar.evaluation import (  # noqa: E402
     Labels,
+    LabelScore,
+    Region,
     ScanObjects,
     TrackScatter,
     count_stats,
@@ -111,6 +113,34 @@ def load_params(path: Path) -> PipelineParams:
     return PipelineParams(**{k: v for k, v in data.items() if k in names})
 
 
+def parse_override(text: str) -> tuple[str, object]:
+    """Parse a parameter override NAME=VALUE, the value is parsed as yaml."""
+    name, sep, value = text.partition("=")
+    if not sep:
+        raise argparse.ArgumentTypeError(f"expected NAME=VALUE, got {text!r}")
+    return name.strip(), yaml.safe_load(value)
+
+
+def override_params(
+    params: PipelineParams, overrides: list[tuple[str, object]]
+) -> PipelineParams:
+    """Replace single parameters, e.g. [("roi_enabled", False)].
+
+    Integers are accepted for float parameters, otherwise the type has to match.
+    """
+    types = {f.name: f.type for f in fields(PipelineParams)}
+    changes = {}
+    for name, raw in overrides:
+        if name not in types:
+            raise SystemExit(f"--set: unknown parameter {name!r}")
+        expected = types[name]
+        value = float(raw) if expected is float and type(raw) is int else raw
+        if type(value) is not expected:
+            raise SystemExit(f"--set: {name} expects {expected}, got {value!r}")
+        changes[name] = value
+    return replace(params, **changes)
+
+
 def load_labels(path: Path) -> Labels | None:
     """Load the hand labels of a bag, None if the file does not exist."""
     if not path.is_file():
@@ -142,6 +172,26 @@ def scatter_stats(tracks: list[TrackScatter]) -> tuple[float, float]:
         return np.nan, np.nan
     scatter = np.array([1e3 * track.scatter for track in tracks])
     return float(np.median(scatter)), float(np.percentile(scatter, 90))
+
+
+def score_metrics(score: LabelScore, prefix: str = "") -> list[Metric]:
+    """Return the table rows of a comparison with the hand labels."""
+    return [
+        Metric(
+            f"{prefix}TP / FN / missed / FP",
+            (
+                score.true_positives,
+                score.false_negatives,
+                score.missed,
+                score.false_positives,
+            ),
+            ("tp", "fn", "missed", "fp"),
+            0,
+        ),
+        Metric(f"{prefix}precision [%]", (100 * score.precision,)),
+        Metric(f"{prefix}recall [%]", (100 * score.recall,)),
+        Metric(f"{prefix}recall incl. missed [%]", (100 * score.recall_total,)),
+    ]
 
 
 def evaluate_bag(
@@ -218,24 +268,17 @@ def evaluate_bag(
     ]
 
     if labels is not None:
-        score = score_labels(scans, labels, args.match_radius)
-        metrics += [
-            Metric("labelled scans", (len(labels.scans),), precision=0),
-            Metric(
-                "TP / FN / missed / FP",
-                (
-                    score.true_positives,
-                    score.false_negatives,
-                    score.missed,
-                    score.false_positives,
-                ),
-                ("tp", "fn", "missed", "fp"),
-                0,
-            ),
-            Metric("precision [%]", (100 * score.precision,)),
-            Metric("recall [%]", (100 * score.recall,)),
-            Metric("recall incl. missed [%]", (100 * score.recall_total,)),
-        ]
+        metrics.append(Metric("labelled scans", (len(labels.scans),), precision=0))
+        metrics += score_metrics(score_labels(scans, labels, args.match_radius))
+        if args.fov_half_angle is not None:
+            # Forward of the vehicle in the laser frame (inverse of laser_yaw)
+            field_of_view = Region(
+                heading=-params.laser_yaw,
+                half_angle=args.fov_half_angle,
+                max_range=np.inf,
+            )
+            score = score_labels(scans, labels, args.match_radius, field_of_view)
+            metrics += score_metrics(score, f"fov ±{args.fov_half_angle:g}° ")
     return metrics
 
 
@@ -336,6 +379,13 @@ def main(argv: list[str] | None = None) -> None:
         help="max. distance labelled box to detected centroid in m",
     )
     parser.add_argument(
+        "--fov-half-angle",
+        type=float,
+        metavar="DEG",
+        help="also score the labels only within +-DEG around forward of the vehicle "
+        "(e.g. field of view of the camera), intersected with the labelled region",
+    )
+    parser.add_argument(
         "--flicker-radius",
         type=float,
         default=0.05,
@@ -348,10 +398,18 @@ def main(argv: list[str] | None = None) -> None:
         metavar="START:END",
         help="scan range with standing vehicle (overrides the labels), repeatable",
     )
+    parser.add_argument(
+        "--set",
+        type=parse_override,
+        action="append",
+        default=[],
+        metavar="NAME=VALUE",
+        help="override a detection parameter, e.g. roi_enabled=false, repeatable",
+    )
     parser.add_argument("--csv", type=Path, help="also write the metrics to a CSV")
     args = parser.parse_args(argv)
 
-    params = load_params(args.params)
+    params = override_params(load_params(args.params), args.set)
     results = {}
     for bag in args.bags:
         print(f"Evaluating {bag} ...", file=sys.stderr)

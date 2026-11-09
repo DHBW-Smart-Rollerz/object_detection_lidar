@@ -50,3 +50,33 @@ object_detection_lidar_node:
     # Min. ratio of points to beams within the angular span, a box is a closed
     # surface (drops sparse clusters like chair legs)
     box_min_fill_ratio: 0.7
+
+    # Region of interest: only objects whose centroid lies in a fixed rectangle
+    # around the vehicle are kept and classified. All valid points are clustered
+    # first and the wall filter runs on the complete objects, because clipping the
+    # points would cut barriers and walls at the border into short straight pieces
+    # that pass the wall filter as boxes. The objects are still published in the
+    # laser frame. The rectangle
+    # is given in the vehicle frame (x forward, y left) with the origin at the
+    # center of the LiDAR (the offset to the vehicle origin is not known yet). It
+    # covers the area behind and next to the vehicle on purpose (360° view, unlike
+    # the camera): merging back after overtaking, parking spots, crossing traffic.
+    # It does not follow curves (see README).
+    # Yaw of the laser frame in the vehicle frame (like a tf base_link -> laser):
+    # p_vehicle = R(laser_yaw) * p_laser. In the rosbags of 03/11/2026 the vehicle
+    # moves along -y of the laser frame and +x points to the left (ego motion by
+    # ICP, turn direction checked against the camera), i.e. 90°.
+    laser_yaw: 90.0 # in deg
+    # Behind the vehicle: after overtaking the vehicle merges back within 2 m
+    # (CAuDri), the overtaken obstacle has to stay visible behind it
+    roi_x_min: -1.5 # in m
+    # Ahead of the vehicle, within max_range
+    roi_x_max: 3.0 # in m
+    # Right: half of the own lane (lanes 350-450 mm wide, CAuDri), the parking
+    # strip on the right (~300 mm) and a margin
+    roi_y_min: -0.8 # in m
+    # Left: half of the own lane, the opposite lane (up to 450 mm), cross parking
+    # spots on the left (~500 mm) and a margin
+    roi_y_max: 1.6 # in m
+    # false keeps all objects (behavior without region of interest)
+    roi_enabled: true

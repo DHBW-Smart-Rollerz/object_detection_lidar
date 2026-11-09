@@ -25,7 +25,8 @@ scans:
   - scan: 101  # moment b2_05
     boxes:  # centroids of the box clusters, in m
       - [1.0591, -0.8382]
-    missed_boxes: 1  # boxes without a cluster
+      - [-0.7947, -0.4013]  # corrected 09/11/2026, camera review
+    missed_boxes: 0  # boxes without a cluster; corrected 09/11/2026, camera review (was 1)
   - scan: 279  # moment b2_15
     boxes:  # centroids of the box clusters, in m
       - [-0.4212, -2.3718]
@@ -42,7 +43,8 @@ scans:
     boxes:  # centroids of the box clusters, in m
       - [0.4224, -0.4236]
       - [1.0326, -2.1231]
-    missed_boxes: 1  # boxes without a cluster
+      - [-0.2282, -1.0148]  # corrected 09/11/2026, camera review
+    missed_boxes: 0  # boxes without a cluster; corrected 09/11/2026, camera review (was 1)
   - scan: 682  # moment b2_35
     boxes:  # centroids of the box clusters, in m
       - [-0.2567, -0.6478]

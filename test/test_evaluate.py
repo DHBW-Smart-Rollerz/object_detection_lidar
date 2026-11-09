@@ -227,3 +227,58 @@ def test_labels_from_dict():
     assert parsed.scans[0].scan == 3
     np.testing.assert_allclose(parsed.scans[0].boxes, [[1.0, 2.0]])
     assert parsed.scans[0].missed_boxes == 1
+
+
+# Camera field of view: +-52° around forward (-y of the laser frame)
+CAMERA = Region(heading=-90.0, half_angle=52.0, max_range=np.inf)
+
+
+def test_field_of_view_region():
+    points = np.array(
+        [
+            [0.0, -1.0],  # straight ahead
+            [1.2, -1.0],  # 50° to the left
+            [-1.4, -1.0],  # 54° to the right
+            [0.0, -10.0],  # far ahead, no range limit
+        ]
+    )
+
+    assert CAMERA.contains(points).tolist() == [True, True, False, True]
+
+
+def test_score_labels_in_field_of_view():
+    scans = [
+        scan(
+            (0.0, -1.0, True),  # labelled box in view: TP
+            (-1.0, -1.2, False),  # labelled box in view (40° right), not a box: FN
+            (2.0, -1.0, True),  # labelled box at 63° left: outside of the view
+            (-2.0, -1.5, True),  # box without label at 53° right: FP only without
+        )
+    ]
+    labelled = labels(
+        {
+            "scan": 0,
+            "boxes": [[0.0, -1.0], [-1.0, -1.2], [2.0, -1.0]],
+            "missed_boxes": 1,
+        }
+    )
+
+    full = score_labels(scans, labelled, match_radius=0.1)
+    in_view = score_labels(scans, labelled, match_radius=0.1, field_of_view=CAMERA)
+
+    assert (full.true_positives, full.false_negatives) == (2, 1)
+    assert (full.missed, full.false_positives) == (1, 1)
+    # The labelled box and the false box outside of the view are ignored, the box
+    # labelled without a cluster has no position and still counts
+    assert (in_view.true_positives, in_view.false_negatives) == (1, 1)
+    assert (in_view.missed, in_view.false_positives) == (1, 0)
+
+
+def test_field_of_view_does_not_widen_the_region():
+    # The labelled region (+-75°, 4 m) still limits the range
+    scans = [scan((0.0, -5.0, True))]
+    labelled = labels({"scan": 0, "boxes": []})
+
+    score = score_labels(scans, labelled, match_radius=0.1, field_of_view=CAMERA)
+
+    assert score.false_positives == 0
