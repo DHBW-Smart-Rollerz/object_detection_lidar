@@ -12,20 +12,47 @@ from smarty_utils.smarty_node import SmartyNode
 from timing import timer
 
 from object_detection_lidar.clustering import DetectedObject
-from object_detection_lidar.pipeline import PipelineParams, detect_objects
+from object_detection_lidar.pipeline import (
+    PipelineParams,
+    camera_format,
+    detect_objects,
+    vehicle_centroids,
+    vehicle_endpoints,
+    vehicle_extents,
+)
 
 # Only used for the visualization, the object data is not changed
 MARKER_MIN_SIZE = 0.02  # in m, keeps thin clusters (e.g. one line) visible
 MARKER_HEIGHT = 0.1  # in m, the scan is 2D, so the objects have no real height
 
-# Fields of the objects point cloud: centroid (x, y, z = 0), axis-aligned extent and
-# diameter in m in the scan frame, is_box is 1.0 for boxes and 0.0 otherwise
+# Frame of the objects point cloud: the vehicle frame of the camera objects (x
+# forward, y left, origin at the center of the front axle, see to_vehicle_frame).
+# There is no tf laser -> vehicle, so rviz with the fixed frame laser cannot show it.
+VEHICLE_FRAME = "vehicle"
+
+# Fields of the objects point cloud, all in m in the vehicle frame: centroid (x, y,
+# z = 0), extent of the box aligned with the vehicle axes and diameter, is_box is 1.0
+# for boxes and 0.0 otherwise, the endpoints of the visible contour (left_x, left_y,
+# right_x, right_y) and their distance (width), like the camera objects.
 OBJECT_FIELDS = [
     sensor_msgs.msg.PointField(
         name=name, offset=4 * i, datatype=sensor_msgs.msg.PointField.FLOAT32, count=1
     )
     for i, name in enumerate(
-        ("x", "y", "z", "extent_x", "extent_y", "diameter", "is_box")
+        (
+            "x",
+            "y",
+            "z",
+            "extent_x",
+            "extent_y",
+            "diameter",
+            "is_box",
+            "left_x",
+            "left_y",
+            "right_x",
+            "right_y",
+            "width",
+        )
     )
 ]
 
@@ -45,6 +72,7 @@ class ObjectDetectionLidarNode(SmartyNode):
                 "points_publisher": "/object_detection_lidar/points",
                 "markers_publisher": "/object_detection_lidar/markers",
                 "objects_publisher": "/object_detection_lidar/objects",
+                "object_publisher": "/object_detection_lidar/object",
                 # Parameters of the detection, defaults from PipelineParams
                 **asdict(PipelineParams()),
                 "state": NodeState.ACTIVE.value,
@@ -61,6 +89,7 @@ class ObjectDetectionLidarNode(SmartyNode):
                 "points_publisher": (sensor_msgs.msg.PointCloud2, 1),
                 "markers_publisher": (visualization_msgs.msg.MarkerArray, 1),
                 "objects_publisher": (sensor_msgs.msg.PointCloud2, 1),
+                "object_publisher": (std_msgs.msg.Float32MultiArray, 1),
             },
         )
 
@@ -89,13 +118,14 @@ class ObjectDetectionLidarNode(SmartyNode):
         Args:
             msg: The laser scan message.
         """
+        params = self.pipeline_params
         result = detect_objects(
             np.asarray(msg.ranges),
             angle_min=msg.angle_min,
             angle_increment=msg.angle_increment,
             range_min=msg.range_min,
             range_max=msg.range_max,
-            params=self.pipeline_params,
+            params=params,
             step_timer=lambda name: timer.Timer(name=name, filter_strength=40),
         )
         points, objects, boxes = result.points, result.objects, result.boxes
@@ -107,12 +137,24 @@ class ObjectDetectionLidarNode(SmartyNode):
             self.points_publisher.publish(cloud)  # type: ignore
 
         with timer.Timer(name="publish_markers", filter_strength=40):
-            markers = self.create_markers(msg.header, objects, boxes)
+            markers = self.create_markers(
+                msg.header, objects, boxes, result.round_objects
+            )
             self.markers_publisher.publish(markers)  # type: ignore
 
         with timer.Timer(name="publish_objects", filter_strength=40):
-            objects_cloud = self.create_objects_cloud(msg.header, objects, boxes)
+            objects_cloud = self.create_objects_cloud(
+                msg.header, objects, boxes, params
+            )
             self.objects_publisher.publish(objects_cloud)  # type: ignore
+
+        with timer.Timer(name="publish_object", filter_strength=40):
+            # Same format as the camera (/object_detection/object), so the fusion
+            # can read both sensors alike. Only the objects in the region of
+            # interest (all with roi_enabled false), an empty array for no object.
+            object_msg = std_msgs.msg.Float32MultiArray()
+            object_msg.data = camera_format(objects, params).tolist()
+            self.object_publisher.publish(object_msg)  # type: ignore
 
         if self._debug:
             self.get_logger().info(f"Valid points: {len(points)}/{len(msg.ranges)}")
@@ -128,50 +170,66 @@ class ObjectDetectionLidarNode(SmartyNode):
 
     @staticmethod
     def create_objects_cloud(
-        header: std_msgs.msg.Header, objects: list[DetectedObject], boxes: list[bool]
+        header: std_msgs.msg.Header,
+        objects: list[DetectedObject],
+        boxes: list[bool],
+        params: PipelineParams,
     ) -> sensor_msgs.msg.PointCloud2:
         """Create a point cloud with one point per object for further processing.
 
-        Each point is the centroid of an object (z = 0, so it can be shown in rviz)
-        with the fields OBJECT_FIELDS. A point cloud is used, because it has a
-        header (frame and stamp of the scan, needed for the fusion) and named
-        fields without a custom message.
+        Each point is the centroid of an object (z = 0) with the fields
+        OBJECT_FIELDS, all transformed into the vehicle frame (vehicle_centroids,
+        vehicle_extents, vehicle_endpoints, frame_id VEHICLE_FRAME). A point
+        cloud is used, because it has a header (stamp of the scan, needed for the
+        fusion) and named fields without a custom message.
 
         Args:
-            header: Header of the scan (frame and stamp of the objects)
+            header: Header of the scan (stamp of the objects)
             objects: The detected objects
             boxes: Whether the object with the same index is a box
+            params: Parameters with laser_yaw and the LiDAR offset
 
         Returns:
             The point cloud.
         """
+        centroids = vehicle_centroids(objects, params)
+        extents = vehicle_extents(objects, params)
+        endpoints = vehicle_endpoints(objects, params)
         rows = [
             (
-                obj.centroid_x,
-                obj.centroid_y,
+                *(float(v) for v in centroid),
                 0.0,
-                obj.extent_x,
-                obj.extent_y,
+                *(float(v) for v in extent),
                 obj.diameter,
                 float(box),
+                *(float(v) for v in ends),
+                obj.width,
             )
-            for obj, box in zip(objects, boxes, strict=True)
+            for obj, box, centroid, extent, ends in zip(
+                objects, boxes, centroids, extents, endpoints, strict=True
+            )
         ]
-        return point_cloud2.create_cloud(header, OBJECT_FIELDS, rows)
+        vehicle_header = std_msgs.msg.Header(stamp=header.stamp, frame_id=VEHICLE_FRAME)
+        return point_cloud2.create_cloud(vehicle_header, OBJECT_FIELDS, rows)
 
     @staticmethod
     def create_markers(
-        header: std_msgs.msg.Header, objects: list[DetectedObject], boxes: list[bool]
+        header: std_msgs.msg.Header,
+        objects: list[DetectedObject],
+        boxes: list[bool],
+        round_objects: list[DetectedObject] | None = None,
     ) -> visualization_msgs.msg.MarkerArray:
         """Create one box marker per object for the visualization in rviz.
 
-        Boxes are red, all other objects are blue. The first marker deletes all
-        markers of the previous scan.
+        Boxes are red, all other objects are blue, the objects dropped as round
+        are gray (namespace "round", for debugging, they are not published
+        anywhere else). The first marker deletes all markers of the previous scan.
 
         Args:
             header: Header of the scan (frame and stamp of the markers)
             objects: The detected objects
             boxes: Whether the object with the same index is a box
+            round_objects: The objects dropped as round
 
         Returns:
             The marker array.
@@ -181,11 +239,14 @@ class ObjectDetectionLidarNode(SmartyNode):
         delete_all.action = visualization_msgs.msg.Marker.DELETEALL
         markers = [delete_all]
 
-        for i, (obj, box) in enumerate(zip(objects, boxes, strict=True)):
+        # 1 box, 0 other object, None round (dropped)
+        classes = [*boxes, *([None] * len(round_objects or []))]
+        all_objects = [*objects, *(round_objects or [])]
+        for i, (obj, box) in enumerate(zip(all_objects, classes, strict=True)):
             marker = visualization_msgs.msg.Marker()
             marker.header = header
-            # Separate namespaces, so both classes can be toggled in rviz
-            marker.ns = "boxes" if box else "objects"
+            # Separate namespaces, so the classes can be toggled in rviz
+            marker.ns = "round" if box is None else "boxes" if box else "objects"
             marker.id = i
             marker.type = visualization_msgs.msg.Marker.CUBE
             marker.action = visualization_msgs.msg.Marker.ADD
@@ -195,7 +256,9 @@ class ObjectDetectionLidarNode(SmartyNode):
             marker.scale.x = max(obj.extent_x, MARKER_MIN_SIZE)
             marker.scale.y = max(obj.extent_y, MARKER_MIN_SIZE)
             marker.scale.z = MARKER_HEIGHT
-            if box:
+            if box is None:
+                marker.color.r = marker.color.g = marker.color.b = 0.6
+            elif box:
                 marker.color.r = 1.0
             else:
                 marker.color.b = 1.0

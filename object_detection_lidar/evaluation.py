@@ -5,7 +5,7 @@ through detect_objects. All positions are in m in the scan frame.
 """
 
 import itertools
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -15,24 +15,38 @@ from object_detection_lidar.pipeline import PipelineResult
 
 @dataclass(frozen=True)
 class ScanObjects:
-    """Centroids and classes of the objects of one scan.
+    """Centroids, classes and endpoints of the objects of one scan.
 
     Attributes:
         centroids: Array of shape (M, 2) with the object centroids in m
         boxes: Array of shape (M,), True for boxes
+        endpoints: Array of shape (M, 4) with left_x, left_y, right_x, right_y of
+            the visible contour in m
     """
 
     centroids: np.ndarray
     boxes: np.ndarray
+    endpoints: np.ndarray
 
     @classmethod
     def from_result(cls, result: PipelineResult) -> "ScanObjects":
-        """Take the centroids and classes from a pipeline result."""
+        """Take the centroids, classes and endpoints from a pipeline result."""
         centroids = np.array(
             [(obj.centroid_x, obj.centroid_y) for obj in result.objects],
             dtype=np.float64,
         ).reshape(-1, 2)
-        return cls(centroids=centroids, boxes=np.array(result.boxes, dtype=bool))
+        endpoints = np.array(
+            [
+                (obj.left_x, obj.left_y, obj.right_x, obj.right_y)
+                for obj in result.objects
+            ],
+            dtype=np.float64,
+        ).reshape(-1, 4)
+        return cls(
+            centroids=centroids,
+            boxes=np.array(result.boxes, dtype=bool),
+            endpoints=endpoints,
+        )
 
 
 @dataclass(frozen=True)
@@ -56,9 +70,14 @@ class Stats:
         )
 
 
-# Steps whose runtimes are added up as "clustering" (as measured in the review of
-# 06/11/2026, where these steps were timed together)
-CLUSTERING_STEPS = ("cluster_points", "extract_objects", "filter_objects")
+# Steps whose runtimes are added up as "segmentation": DBSCAN, breakpoint
+# splitting (or ABD alone) and building and filtering the objects
+SEGMENTATION_STEPS = (
+    "cluster_points",
+    "split_clusters",
+    "extract_objects",
+    "filter_objects",
+)
 
 
 def timing_stats(step_times: Sequence[Mapping[str, float]]) -> dict[str, Stats]:
@@ -69,18 +88,18 @@ def timing_stats(step_times: Sequence[Mapping[str, float]]) -> dict[str, Stats]:
             "total" is the runtime of the whole detection.
 
     Returns:
-        Statistics in ms per step, plus "clustering" (sum of CLUSTERING_STEPS) if
-        all of these steps were measured.
+        Statistics in ms per step, plus "segmentation" (sum of SEGMENTATION_STEPS)
+        if all of these steps were measured.
     """
     names = list(dict.fromkeys(name for times in step_times for name in times))
     stats = {
         name: Stats.of([1e3 * times[name] for times in step_times if name in times])
         for name in names
     }
-    if all(name in names for name in CLUSTERING_STEPS):
-        stats["clustering"] = Stats.of(
+    if all(name in names for name in SEGMENTATION_STEPS):
+        stats["segmentation"] = Stats.of(
             [
-                1e3 * sum(times[name] for name in CLUSTERING_STEPS)
+                1e3 * sum(times[name] for name in SEGMENTATION_STEPS)
                 for times in step_times
             ]
         )
@@ -154,6 +173,10 @@ class TrackScatter:
     scatter: float  # in m, norm of the standard deviations of x and y
     box_ratio: float  # share of the scans with the object classified as box
     num_scans: int  # scans in which the object was found
+    width: float  # in m, median distance of the endpoints
+    # in m, scatter of the endpoints: mean of the norms of the standard deviations
+    # of the left and of the right endpoint
+    endpoint_scatter: float
 
 
 def static_scatter(
@@ -164,7 +187,9 @@ def static_scatter(
     The objects are followed greedily: each object joins the track whose mean
     centroid is nearest, if it is closer than radius, otherwise it starts a new
     track. Only tracks found in at least min_presence of the scans are kept. The
-    scatter is the precision of the centroid, not its absolute accuracy.
+    scatter is the precision of the centroid, not its absolute accuracy. The same
+    holds for the endpoints, whose scatter also contains the beam spacing (the
+    outermost beam that hits the object can change from scan to scan).
 
     Args:
         scans: The objects of consecutive scans of one static phase
@@ -174,17 +199,21 @@ def static_scatter(
     Returns:
         The scatter of each kept track, ordered by distance.
     """
-    tracks: list[list[tuple[float, float, bool]]] = []
+    # Per track: centroid x, y, is_box and the endpoints (4 values)
+    tracks: list[list[tuple[float, float, bool, np.ndarray]]] = []
     means: list[np.ndarray] = []
     for scan in scans:
-        for centroid, box in zip(scan.centroids, scan.boxes, strict=True):
+        for centroid, box, ends in zip(
+            scan.centroids, scan.boxes, scan.endpoints, strict=True
+        ):
+            entry = (centroid[0], centroid[1], bool(box), np.asarray(ends))
             distances = [np.linalg.norm(mean - centroid) for mean in means]
             best = int(np.argmin(distances)) if distances else -1
             if best >= 0 and distances[best] < radius:
-                tracks[best].append((centroid[0], centroid[1], bool(box)))
+                tracks[best].append(entry)
                 means[best] = np.mean([p[:2] for p in tracks[best]], axis=0)
             else:
-                tracks.append([(centroid[0], centroid[1], bool(box))])
+                tracks.append([entry])
                 means.append(np.array(centroid, dtype=np.float64))
 
     result = []
@@ -192,12 +221,29 @@ def static_scatter(
         if len(track) < min_presence * len(scans):
             continue
         xy = np.array([p[:2] for p in track])
+        ends = np.array([p[3] for p in track])
+        has_ends = not np.isnan(ends).any()
         result.append(
             TrackScatter(
                 distance=float(np.linalg.norm(xy.mean(axis=0))),
                 scatter=float(np.linalg.norm(xy.std(axis=0))),
                 box_ratio=float(np.mean([p[2] for p in track])),
                 num_scans=len(track),
+                width=float(
+                    np.median(np.hypot(*(ends[:, :2] - ends[:, 2:]).T))
+                    if has_ends
+                    else np.nan
+                ),
+                endpoint_scatter=float(
+                    np.mean(
+                        [
+                            np.linalg.norm(ends[:, :2].std(axis=0)),
+                            np.linalg.norm(ends[:, 2:].std(axis=0)),
+                        ]
+                    )
+                    if has_ends
+                    else np.nan
+                ),
             )
         )
     return sorted(result, key=lambda track: track.distance)
@@ -319,6 +365,32 @@ def match_nearest(
     return pairs
 
 
+def _labelled_scans(
+    scans: Sequence[ScanObjects],
+    labels: Labels,
+    field_of_view: Region | None,
+) -> Iterator[tuple[LabelledScan, np.ndarray, np.ndarray, np.ndarray]]:
+    """Yield each labelled scan restricted to the labelled region.
+
+    With field_of_view, the region is the intersection of the labelled region and
+    the field of view.
+
+    Yields:
+        The labelled scan, its labelled boxes in the region and the centroids and
+        classes of the detected objects in the region.
+    """
+    for labelled in labels.scans:
+        if labelled.scan >= len(scans):
+            raise ValueError(f"Labelled scan {labelled.scan} is not in the bag")
+        scan = scans[labelled.scan]
+        in_region = labels.region.contains(scan.centroids)
+        labelled_boxes = labelled.boxes
+        if field_of_view is not None:
+            in_region &= field_of_view.contains(scan.centroids)
+            labelled_boxes = labelled_boxes[field_of_view.contains(labelled_boxes)]
+        yield labelled, labelled_boxes, scan.centroids[in_region], scan.boxes[in_region]
+
+
 def score_labels(
     scans: Sequence[ScanObjects],
     labels: Labels,
@@ -348,18 +420,9 @@ def score_labels(
         The counts of the comparison.
     """
     tp = fn = missed = fp = 0
-    for labelled in labels.scans:
-        if labelled.scan >= len(scans):
-            raise ValueError(f"Labelled scan {labelled.scan} is not in the bag")
-        scan = scans[labelled.scan]
-        in_region = labels.region.contains(scan.centroids)
-        labelled_boxes = labelled.boxes
-        if field_of_view is not None:
-            in_region &= field_of_view.contains(scan.centroids)
-            labelled_boxes = labelled_boxes[field_of_view.contains(labelled_boxes)]
-        centroids = scan.centroids[in_region]
-        boxes = scan.boxes[in_region]
-
+    for labelled, labelled_boxes, centroids, boxes in _labelled_scans(
+        scans, labels, field_of_view
+    ):
         pairs = match_nearest(labelled_boxes, centroids, match_radius)
         matched = {j for _, j in pairs}
         hits = sum(bool(boxes[j]) for _, j in pairs)
@@ -370,3 +433,58 @@ def score_labels(
     return LabelScore(
         true_positives=tp, false_negatives=fn, missed=missed, false_positives=fp
     )
+
+
+@dataclass(frozen=True)
+class ObjectScore:
+    """Result of the object detection (any class) compared to the hand labels."""
+
+    found: int  # labelled boxes matched by a detected object (box or other)
+    not_found: int  # labelled boxes with a position, no object within the radius
+    missed: int  # labelled boxes without a cluster (no position)
+
+    @property
+    def recall(self) -> float:
+        """Return the share of the labelled box clusters found as object."""
+        total = self.found + self.not_found
+        return self.found / total if total else np.nan
+
+    @property
+    def recall_total(self) -> float:
+        """Return the share of all labelled boxes found as object."""
+        total = self.found + self.not_found + self.missed
+        return self.found / total if total else np.nan
+
+
+def score_objects(
+    scans: Sequence[ScanObjects],
+    labels: Labels,
+    match_radius: float,
+    field_of_view: Region | None = None,
+) -> ObjectScore:
+    """Check whether the labelled boxes were detected as objects at all.
+
+    Like score_labels, but the class is ignored: the labelled boxes of a scan are
+    matched one to one to all detected objects in the labelled region (optionally
+    intersected with field_of_view). A matched labelled box counts as found, also
+    if its object is classified as other. The class comes from the camera, the
+    LiDAR has to find the obstacle and measure its position.
+
+    Args:
+        scans: The objects of all scans of the bag (after the region of interest)
+        labels: The hand labels of the bag
+        match_radius: Max. distance between a labelled and a detected centroid in m
+        field_of_view: Additional restriction of the region, see score_labels
+
+    Returns:
+        The counts of the comparison.
+    """
+    found = not_found = missed = 0
+    for labelled, labelled_boxes, centroids, _ in _labelled_scans(
+        scans, labels, field_of_view
+    ):
+        pairs = match_nearest(labelled_boxes, centroids, match_radius)
+        found += len(pairs)
+        not_found += len(labelled_boxes) - len(pairs)
+        missed += labelled.missed_boxes
+    return ObjectScore(found=found, not_found=not_found, missed=missed)

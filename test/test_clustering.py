@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 from object_detection_lidar.clustering import (
     cluster_points,
+    contour_endpoints,
     extract_objects,
     filter_objects,
 )
@@ -26,7 +27,7 @@ def test_two_separated_groups():
     assert len(objects) == 2
     centroids = sorted((obj.centroid_x, obj.centroid_y) for obj in objects)
     np.testing.assert_allclose(centroids, [[1.0, 0.0], [1.0, 1.0]], atol=1e-9)
-    assert [obj.num_points for obj in objects] == [5, 5]
+    assert [len(obj.points) for obj in objects] == [5, 5]
 
 
 def test_single_point_is_noise():
@@ -37,7 +38,7 @@ def test_single_point_is_noise():
 
     assert labels[-1] == -1
     assert len(objects) == 1
-    assert objects[0].num_points == 5
+    assert len(objects[0].points) == 5
 
 
 def test_empty_input():
@@ -143,7 +144,7 @@ def test_single_point_cluster():
 
     objects = extract_objects(points, cluster_points(points, EPS, min_samples=1))
 
-    single = [obj for obj in objects if obj.num_points == 1]
+    single = [obj for obj in objects if len(obj.points) == 1]
     assert len(objects) == 2
     assert len(single) == 1
     assert single[0].diameter == 0.0
@@ -160,7 +161,52 @@ def test_objects_keep_their_points():
 
     assert sorted(len(obj.points) for obj in filtered) == [5, 7]
     for obj in filtered:
-        assert len(obj.points) == obj.num_points
         np.testing.assert_allclose(
             obj.points.mean(axis=0), (obj.centroid_x, obj.centroid_y)
         )
+
+
+def test_endpoints_of_line_ahead():
+    # Line across x = 1 m from y = -0.2 to 0.3, left (larger bearing) is +y
+    ys = np.linspace(-0.2, 0.3, 11)
+    points = np.column_stack((np.full_like(ys, 1.0), ys))
+
+    (obj,) = extract_objects(points, np.zeros(len(points), dtype=int))
+
+    assert (obj.left_x, obj.left_y) == pytest.approx((1.0, 0.3))
+    assert (obj.right_x, obj.right_y) == pytest.approx((1.0, -0.2))
+    assert obj.width == pytest.approx(0.5)
+
+
+def test_endpoints_behind_sensor_wrap_around():
+    # Line across x = -1 m crossing the ±pi border of atan2 at y = 0 (points with
+    # y < 0 have a bearing near -pi, those with y > 0 near +pi). Seen from the
+    # sensor looking along -x, left is -y and right is +y
+    ys = np.linspace(-0.2, 0.3, 11)
+    points = np.column_stack((np.full_like(ys, -1.0), ys))
+
+    left, right = contour_endpoints(points)
+
+    np.testing.assert_allclose(left, [-1.0, -0.2])
+    np.testing.assert_allclose(right, [-1.0, 0.3])
+
+
+def test_endpoints_of_corner():
+    # L-shaped box corner in front of the sensor: one side faces the sensor, the
+    # other one runs away from it along x. The endpoints bound the angular span,
+    # the far end of the side along x lies within it
+    side_a = np.column_stack((np.linspace(1.0, 1.2, 5), np.full(5, 0.1)))
+    side_b = np.column_stack((np.full(5, 1.0), np.linspace(0.1, -0.1, 5)))
+    points = np.vstack((side_a, side_b))
+
+    left, right = contour_endpoints(points)
+
+    np.testing.assert_allclose(left, [1.0, 0.1])  # bearing atan(0.1) is largest
+    np.testing.assert_allclose(right, [1.0, -0.1])
+
+
+def test_endpoints_of_single_point():
+    left, right = contour_endpoints(np.array([[1.0, 2.0]]))
+
+    np.testing.assert_allclose(left, [1.0, 2.0])
+    np.testing.assert_allclose(right, [1.0, 2.0])

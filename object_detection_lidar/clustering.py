@@ -9,12 +9,14 @@ from sklearn.cluster import DBSCAN
 
 @dataclass(frozen=True)
 class DetectedObject:
-    """Centroid, axis-aligned bounding box and diameter of a point cluster.
+    """Centroid, axis-aligned bounding box, diameter and endpoints of a cluster.
 
     All values are in m and given in the scan frame. The diameter is the largest
     distance between two points of the cluster and, unlike the box, does not depend
-    on the rotation of the object. The points of the cluster are kept, so later
-    steps (e.g. the box classification) work on exactly the same cluster.
+    on the rotation of the object. The endpoints are the outermost points of the
+    visible contour as seen from the sensor (see contour_endpoints), the width is
+    their distance. The points of the cluster are kept, so later steps (e.g. the
+    box classification) work on exactly the same cluster.
     """
 
     centroid_x: float
@@ -23,9 +25,12 @@ class DetectedObject:
     max_x: float
     min_y: float
     max_y: float
-    num_points: int
     diameter: float
-    # Array of shape (num_points, 2), not compared, so objects can still be compared
+    left_x: float  # endpoint with the largest bearing (left as seen from sensor)
+    left_y: float
+    right_x: float  # endpoint with the smallest bearing (right as seen from sensor)
+    right_y: float
+    # Array of shape (N, 2), not compared, so objects can still be compared
     # by their values (numpy arrays have no single truth value)
     points: np.ndarray = field(compare=False, repr=False)
 
@@ -38,6 +43,38 @@ class DetectedObject:
     def extent_y(self) -> float:
         """Return the size of the box along y in m."""
         return self.max_y - self.min_y
+
+    @property
+    def width(self) -> float:
+        """Return the distance between the two endpoints in m."""
+        return float(np.hypot(self.left_x - self.right_x, self.left_y - self.right_y))
+
+
+def contour_endpoints(points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Find the outermost points of a cluster as seen from the sensor.
+
+    The bearing (angle around the sensor origin) of each point is taken relative
+    to the bearing of the mean point and wrapped to [-pi, pi). This avoids the jump
+    from +pi to -pi for objects behind the sensor (around ±180°). An object spans
+    much less than 180°, so the relative bearing is unique.
+
+    The left endpoint has the largest bearing (counterclockwise, left when looking
+    from the sensor at the object), the right endpoint the smallest. Like the
+    bottom corners of a camera bounding box, they bound the visible part of the
+    object, the hidden back side is not measured.
+
+    Args:
+        points: Array of shape (N, 2) with x/y coordinates in m (N >= 1)
+
+    Returns:
+        The left and the right endpoint, each an array of shape (2,).
+    """
+    points = np.asarray(points, dtype=np.float64).reshape(-1, 2)
+    mean = points.mean(axis=0)
+    reference = np.arctan2(mean[1], mean[0])
+    bearings = np.arctan2(points[:, 1], points[:, 0]) - reference
+    relative = (bearings + np.pi) % (2 * np.pi) - np.pi
+    return points[int(np.argmax(relative))], points[int(np.argmin(relative))]
 
 
 def cluster_points(points: np.ndarray, eps: float, min_samples: int) -> np.ndarray:
@@ -83,6 +120,7 @@ def extract_objects(points: np.ndarray, labels: np.ndarray) -> list[DetectedObje
         centroid = cluster.mean(axis=0)
         minimum = cluster.min(axis=0)
         maximum = cluster.max(axis=0)
+        left, right = contour_endpoints(cluster)
         objects.append(
             DetectedObject(
                 centroid_x=float(centroid[0]),
@@ -91,10 +129,13 @@ def extract_objects(points: np.ndarray, labels: np.ndarray) -> list[DetectedObje
                 max_x=float(maximum[0]),
                 min_y=float(minimum[1]),
                 max_y=float(maximum[1]),
-                num_points=len(cluster),
                 # Single-point clusters are possible with min_samples = 1, pdist
                 # then returns an empty array and the diameter is 0
                 diameter=float(pdist(cluster).max(initial=0.0)),
+                left_x=float(left[0]),
+                left_y=float(left[1]),
+                right_x=float(right[0]),
+                right_y=float(right[1]),
                 points=cluster,
             )
         )

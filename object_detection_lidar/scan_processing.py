@@ -3,6 +3,24 @@
 import numpy as np
 
 
+def valid_beams(ranges: np.ndarray, range_min: float, range_max: float) -> np.ndarray:
+    """Check which beams have a valid range.
+
+    Invalid measurements (inf, nan) and ranges outside [range_min, range_max] are
+    not valid.
+
+    Args:
+        ranges: Measured distances in m, one per beam
+        range_min: Minimum valid range in m
+        range_max: Maximum valid range in m
+
+    Returns:
+        Array of the same shape as ranges, True for the valid beams.
+    """
+    ranges = np.asarray(ranges, dtype=np.float64)
+    return np.isfinite(ranges) & (ranges >= range_min) & (ranges <= range_max)
+
+
 def scan_to_points(
     ranges: np.ndarray,
     angle_min: float,
@@ -13,7 +31,7 @@ def scan_to_points(
     """Convert the ranges of a 2D laser scan into x/y points in the sensor frame.
 
     Invalid measurements (inf, nan) and ranges outside [range_min, range_max] are
-    dropped.
+    dropped (see valid_beams).
 
     Args:
         ranges: Measured distances in m, one per beam
@@ -28,7 +46,7 @@ def scan_to_points(
     ranges = np.asarray(ranges, dtype=np.float64)
     angles = angle_min + np.arange(ranges.size) * angle_increment
 
-    valid = np.isfinite(ranges) & (ranges >= range_min) & (ranges <= range_max)
+    valid = valid_beams(ranges, range_min, range_max)
     ranges = ranges[valid]
     angles = angles[valid]
 

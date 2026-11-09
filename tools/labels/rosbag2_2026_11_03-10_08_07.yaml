@@ -60,7 +60,7 @@ scans:
   - scan: 496  # moment b1_40
     boxes:  # centroids of the box clusters, in m
       - [0.5781, -2.4335]
-      - [-1.6782, -3.1651]
+      # removed 09/11/2026: [-1.6782, -3.1651], off-track room object, camera-checked
     missed_boxes: 1  # boxes without a cluster
   - scan: 542  # moment b1_44
     boxes:  # centroids of the box clusters, in m

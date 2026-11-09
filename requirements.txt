@@ -2,3 +2,4 @@ numpy
 rclpy
 scipy
 scikit-learn
+pyyaml

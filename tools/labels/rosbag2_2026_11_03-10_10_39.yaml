@@ -33,8 +33,7 @@ scans:
       - [1.0278, -3.4378]
     missed_boxes: 0  # boxes without a cluster
   - scan: 365  # moment b2_20
-    boxes:  # centroids of the box clusters, in m
-      - [1.9136, -1.9839]
+    boxes: []  # removed 09/11/2026: [1.9136, -1.9839], off-track room object, camera-checked
     missed_boxes: 0  # boxes without a cluster
   - scan: 498  # moment b2_25
     boxes: []
@@ -52,17 +51,17 @@ scans:
   - scan: 766  # moment b2_40
     boxes:  # centroids of the box clusters, in m
       - [0.2656, -0.9812]
-      - [-1.5657, -1.0811]
+      # removed 09/11/2026: [-1.5657, -1.0811], off-track room object, camera-checked
     missed_boxes: 0  # boxes without a cluster
   - scan: 854  # moment b2_45
     boxes:  # centroids of the box clusters, in m
       - [-0.2514, -0.3727]
-      - [2.2117, -2.6552]
+      # removed 09/11/2026: [2.2117, -2.6552], off-track room object, camera-checked
     missed_boxes: 0  # boxes without a cluster
   - scan: 967  # moment b2_50
     boxes:  # centroids of the box clusters, in m
       - [0.5351, -1.1675]
-      - [-1.8456, -0.7910]
+      # removed 09/11/2026: [-1.8456, -0.7910], off-track room object, camera-checked
     missed_boxes: 0  # boxes without a cluster
   - scan: 1056  # moment b2_55
     boxes:  # centroids of the box clusters, in m

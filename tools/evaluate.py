@@ -26,12 +26,14 @@ sys.path.insert(0, str(PACKAGE_DIR))
 from object_detection_lidar.evaluation import (  # noqa: E402
     Labels,
     LabelScore,
+    ObjectScore,
     Region,
     ScanObjects,
     TrackScatter,
     count_stats,
     flicker,
     score_labels,
+    score_objects,
     static_scatter,
     timing_stats,
 )
@@ -174,6 +176,35 @@ def scatter_stats(tracks: list[TrackScatter]) -> tuple[float, float]:
     return float(np.median(scatter)), float(np.percentile(scatter, 90))
 
 
+def endpoint_stats(tracks: list[TrackScatter]) -> tuple[float, float, float]:
+    """Return the median width and median / p95 of the endpoint scatter in mm."""
+    widths = np.array([1e3 * t.width for t in tracks if not np.isnan(t.width)])
+    scatter = np.array(
+        [1e3 * t.endpoint_scatter for t in tracks if not np.isnan(t.endpoint_scatter)]
+    )
+    if not widths.size:
+        return np.nan, np.nan, np.nan
+    return (
+        float(np.median(widths)),
+        float(np.median(scatter)),
+        float(np.percentile(scatter, 95)),
+    )
+
+
+def object_metrics(score: ObjectScore, prefix: str = "") -> list[Metric]:
+    """Return the table rows of the object recall (class ignored)."""
+    return [
+        Metric(
+            f"{prefix}objects found / not found / missed",
+            (score.found, score.not_found, score.missed),
+            ("found", "not found", "missed"),
+            0,
+        ),
+        Metric(f"{prefix}objects recall [%]", (100 * score.recall,)),
+        Metric(f"{prefix}objects recall incl. missed [%]", (100 * score.recall_total,)),
+    ]
+
+
 def score_metrics(score: LabelScore, prefix: str = "") -> list[Metric]:
     """Return the table rows of a comparison with the hand labels."""
     return [
@@ -224,7 +255,7 @@ def evaluate_bag(
     stats_suffixes = ("median", "p95", "max")
     metrics = [Metric("scans", (len(scans),), precision=0)]
     timing = timing_stats(step_times)
-    for name in ("total", *STEPS, "clustering"):
+    for name in ("total", *STEPS, "segmentation"):
         s = timing[name]
         metrics.append(
             Metric(f"time {name} [ms]", (s.median, s.p95, s.max), stats_suffixes, 2)
@@ -257,18 +288,35 @@ def evaluate_bag(
         metrics.append(
             Metric(
                 f"static {start}:{end}",
-                (len(phase_tracks), *scatter_stats(phase_tracks)),
-                ("objects", "median [mm]", "p90 [mm]"),
+                (
+                    len(phase_tracks),
+                    *scatter_stats(phase_tracks),
+                    *endpoint_stats(phase_tracks),
+                ),
+                (
+                    "objects",
+                    "median [mm]",
+                    "p90 [mm]",
+                    "width median [mm]",
+                    "endpoint median [mm]",
+                    "endpoint p95 [mm]",
+                ),
                 phase=(start, end),
             )
         )
     metrics += [
         Metric("static objects", (len(tracks),), precision=0),
         Metric("static scatter [mm]", scatter_stats(tracks), ("median", "p90")),
+        Metric(
+            "static width / endpoint scatter [mm]",
+            endpoint_stats(tracks),
+            ("width median", "endpoint median", "endpoint p95"),
+        ),
     ]
 
     if labels is not None:
         metrics.append(Metric("labelled scans", (len(labels.scans),), precision=0))
+        metrics += object_metrics(score_objects(scans, labels, args.match_radius))
         metrics += score_metrics(score_labels(scans, labels, args.match_radius))
         if args.fov_half_angle is not None:
             # Forward of the vehicle in the laser frame (inverse of laser_yaw)
@@ -277,8 +325,12 @@ def evaluate_bag(
                 half_angle=args.fov_half_angle,
                 max_range=np.inf,
             )
+            prefix = f"fov ±{args.fov_half_angle:g}° "
+            metrics += object_metrics(
+                score_objects(scans, labels, args.match_radius, field_of_view), prefix
+            )
             score = score_labels(scans, labels, args.match_radius, field_of_view)
-            metrics += score_metrics(score, f"fov ±{args.fov_half_angle:g}° ")
+            metrics += score_metrics(score, prefix)
     return metrics
 
 
@@ -326,14 +378,23 @@ def print_static_table(results: dict[str, list[Metric]]) -> None:
     ]
     if not rows:
         return
-    header = ("bag", "scans", "objects", "median [mm]", "p90 [mm]")
-    widths = [max(len(str(r[i])) for r in (header, *rows)) for i in range(5)]
+    header = (
+        "bag",
+        "scans",
+        "objects",
+        "median [mm]",
+        "p90 [mm]",
+        "width med [mm]",
+        "endpt med [mm]",
+        "endpt p95 [mm]",
+    )
+    widths = [max(len(str(r[i])) for r in (header, *rows)) for i in range(len(header))]
     print()
     print(
         f"{header[0]:<{widths[0]}}  "
         + "  ".join(f"{h:>{w}}" for h, w in zip(header[1:], widths[1:], strict=True))
     )
-    print("-" * (sum(widths) + 2 * 4))
+    print("-" * (sum(widths) + 2 * (len(header) - 1)))
     for row in rows:
         print(
             f"{row[0]:<{widths[0]}}  "

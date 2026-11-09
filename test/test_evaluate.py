@@ -10,6 +10,7 @@ from object_detection_lidar.evaluation import (
     flicker,
     match_nearest,
     score_labels,
+    score_objects,
     static_scatter,
     timing_stats,
 )
@@ -20,10 +21,15 @@ FRONT = {"heading": -90.0, "half_angle": 75.0, "max_range": 4.0}
 
 
 def scan(*objects: tuple[float, float, bool]) -> ScanObjects:
-    """Return a scan with objects given as (x, y, is_box)."""
+    """Return a scan with point objects given as (x, y, is_box).
+
+    Both endpoints of an object are its centroid (width 0).
+    """
+    centroids = np.array([obj[:2] for obj in objects], dtype=float).reshape(-1, 2)
     return ScanObjects(
-        centroids=np.array([obj[:2] for obj in objects], dtype=float).reshape(-1, 2),
+        centroids=centroids,
         boxes=np.array([obj[2] for obj in objects], dtype=bool),
+        endpoints=np.hstack((centroids, centroids)),
     )
 
 
@@ -36,6 +42,10 @@ def test_scan_objects_from_result():
 
     np.testing.assert_allclose(scan_objects.centroids, [[1.0, 0.1], [2.0, 2.2]])
     assert scan_objects.boxes.tolist() == [True, False]
+    # left = larger bearing (seen from the sensor)
+    np.testing.assert_allclose(
+        scan_objects.endpoints, [[1.0, 0.2, 1.0, 0.0], [2.0, 2.4, 2.0, 2.0]]
+    )
 
 
 def test_scan_objects_from_empty_result():
@@ -45,6 +55,7 @@ def test_scan_objects_from_empty_result():
 
     assert scan_objects.centroids.shape == (0, 2)
     assert scan_objects.boxes.shape == (0,)
+    assert scan_objects.endpoints.shape == (0, 4)
 
 
 def test_stats():
@@ -54,10 +65,11 @@ def test_stats():
     assert np.isnan(Stats.of([]).median)
 
 
-def test_timing_stats_in_ms_with_clustering_sum():
+def test_timing_stats_in_ms_with_segmentation_sum():
     times = [
         {
             "cluster_points": 0.001 * i,
+            "split_clusters": 0.001,
             "extract_objects": 0.002,
             "filter_objects": 0.0,
             "total": 0.01,
@@ -69,10 +81,10 @@ def test_timing_stats_in_ms_with_clustering_sum():
 
     assert stats["total"].median == pytest.approx(10.0)
     assert stats["cluster_points"].max == pytest.approx(3.0)
-    assert stats["clustering"].median == pytest.approx(4.0)
+    assert stats["segmentation"].median == pytest.approx(5.0)
 
 
-def test_timing_stats_without_clustering_steps():
+def test_timing_stats_without_segmentation_steps():
     stats = timing_stats([{"total": 0.01}])
 
     assert set(stats) == {"total"}
@@ -282,3 +294,94 @@ def test_field_of_view_does_not_widen_the_region():
     score = score_labels(scans, labelled, match_radius=0.1, field_of_view=CAMERA)
 
     assert score.false_positives == 0
+
+
+def test_score_objects_ignores_the_class():
+    scans = [
+        scan(
+            (0.0, -1.0, True),  # labelled box found as box
+            (0.5, -2.0, False),  # labelled box found as other: still found
+            (-0.5, -2.0, True),  # object without label: no effect
+            (1.0, 3.0, False),  # near a label, but behind the vehicle (outside)
+        )
+    ]
+    labelled = labels(
+        {
+            "scan": 0,
+            "boxes": [[0.02, -1.0], [0.5, -2.0], [1.0, -3.0]],  # last: no object
+            "missed_boxes": 2,
+        }
+    )
+
+    score = score_objects(scans, labelled, match_radius=0.1)
+
+    assert (score.found, score.not_found, score.missed) == (2, 1, 2)
+    assert score.recall == pytest.approx(2 / 3)
+    assert score.recall_total == pytest.approx(2 / 5)
+    # The box metric counts the other object as false negative
+    assert score_labels(scans, labelled, match_radius=0.1).false_negatives == 1
+
+
+def test_score_objects_match_radius_and_one_to_one():
+    scans = [scan((0.0, -1.0, False))]
+    # Two labelled boxes near the same object (merged cluster): only one is found
+    labelled = labels({"scan": 0, "boxes": [[0.0, -1.08], [0.0, -0.95]]})
+
+    near = score_objects(scans, labelled, match_radius=0.1)
+    far = score_objects(scans, labelled, match_radius=0.03)
+
+    assert (near.found, near.not_found) == (1, 1)
+    assert (far.found, far.not_found) == (0, 2)
+
+
+def test_score_objects_in_field_of_view():
+    scans = [
+        scan(
+            (0.0, -1.0, False),  # labelled, in view
+            (2.0, -1.0, False),  # labelled, 63° left: outside of the view
+            (0.0, -5.0, False),  # labelled, but beyond the labelled region
+        )
+    ]
+    labelled = labels(
+        {
+            "scan": 0,
+            "boxes": [[0.0, -1.0], [2.0, -1.0], [-2.0, -1.5], [0.0, -5.0]],
+            "missed_boxes": 1,
+        }
+    )
+
+    full = score_objects(scans, labelled, match_radius=0.1)
+    in_view = score_objects(scans, labelled, match_radius=0.1, field_of_view=CAMERA)
+
+    # The object beyond 4 m is outside of the region, so its label is not found
+    assert (full.found, full.not_found, full.missed) == (2, 2, 1)
+    # Labelled boxes outside of the view are ignored, missed boxes always count
+    assert (in_view.found, in_view.not_found, in_view.missed) == (1, 1, 1)
+
+
+def test_score_objects_without_labels():
+    score = score_objects([scan((0.0, -1.0, False))], labels({"scan": 0}), 0.1)
+
+    assert (score.found, score.not_found, score.missed) == (0, 0, 0)
+    assert np.isnan(score.recall)
+    assert np.isnan(score.recall_total)
+
+
+def test_static_scatter_endpoints():
+    # Object 0.2 m wide, the left endpoint jitters +-1 cm along y, the right one
+    # +-2 cm along x
+    def with_ends(left_y: float, right_x: float) -> ScanObjects:
+        return ScanObjects(
+            centroids=np.array([[1.0, 0.0]]),
+            boxes=np.array([True]),
+            endpoints=np.array([[1.0, 0.1 + left_y, 1.0 + right_x, -0.1]]),
+        )
+
+    scans = [with_ends(0.01, 0.02), with_ends(-0.01, -0.02)] * 2
+
+    (track,) = static_scatter(scans)
+
+    assert track.endpoint_scatter == pytest.approx((0.01 + 0.02) / 2)
+    assert track.width == pytest.approx(
+        np.median([np.hypot(0.02, 0.21), np.hypot(0.02, 0.19)])
+    )
