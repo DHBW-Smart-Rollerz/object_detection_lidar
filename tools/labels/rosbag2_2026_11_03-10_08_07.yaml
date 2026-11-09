@@ -1,0 +1,77 @@
+# Hand labels of the box classification (06/11/2026, one person, partly
+# uncertain). Each entry is the scan closest to a camera image (<= 50 ms).
+# Format and meaning: see README (Evaluation).
+bag: rosbag2_2026_11_03-10_08_07
+frame: laser
+# Labelled area: all clusters in it were reviewed, every predicted box in it
+# that matches no labelled box counts as false positive
+region:
+  heading: -90.0  # in deg, forward = -y of the laser frame (from ICP)
+  half_angle: 75.0  # in deg
+  max_range: 4.0  # in m
+# Scan index ranges [start, end) with the vehicle standing: ICP shift between
+# consecutive scans < 1 mm (~1 cm/s) for at least 6 scans
+static_scans:
+  - [0, 6]
+  - [633, 649]
+scans:
+  - scan: 10  # moment b1_00
+    boxes:  # centroids of the box clusters, in m
+      - [0.3528, -1.1788]
+      - [1.4153, -1.8966]
+      - [-0.2516, -2.4799]
+    missed_boxes: 0  # boxes without a cluster
+  - scan: 50  # moment b1_04
+    boxes:  # centroids of the box clusters, in m
+      - [0.3057, -0.1777]
+      - [-0.3030, -1.4126]
+    missed_boxes: 0  # boxes without a cluster
+  - scan: 92  # moment b1_08
+    boxes:  # centroids of the box clusters, in m
+      - [-0.2630, -0.4286]
+    missed_boxes: 0  # boxes without a cluster
+  - scan: 136  # moment b1_12
+    boxes:  # centroids of the box clusters, in m
+      - [1.3796, -2.0465]
+    missed_boxes: 0  # boxes without a cluster
+  - scan: 202  # moment b1_16
+    boxes:  # centroids of the box clusters, in m
+      - [-0.3746, -0.3462]
+      - [1.3125, -0.5698]
+    missed_boxes: 0  # boxes without a cluster
+  - scan: 269  # moment b1_20
+    boxes: []
+    missed_boxes: 0  # boxes without a cluster
+  - scan: 316  # moment b1_24
+    boxes:  # centroids of the box clusters, in m
+      - [0.2906, -0.8390]
+      - [-0.4165, -3.1704]
+    missed_boxes: 0  # boxes without a cluster
+  - scan: 357  # moment b1_28
+    boxes: []
+    missed_boxes: 1  # boxes without a cluster
+  - scan: 399  # moment b1_32
+    boxes: []
+    missed_boxes: 0  # boxes without a cluster
+  - scan: 447  # moment b1_36
+    boxes: []
+    missed_boxes: 0  # boxes without a cluster
+  - scan: 496  # moment b1_40
+    boxes:  # centroids of the box clusters, in m
+      - [0.5781, -2.4335]
+      - [-1.6782, -3.1651]
+    missed_boxes: 1  # boxes without a cluster
+  - scan: 542  # moment b1_44
+    boxes:  # centroids of the box clusters, in m
+      - [0.1835, -0.2194]
+      - [-0.1324, -1.9526]
+    missed_boxes: 0  # boxes without a cluster
+  - scan: 579  # moment b1_48
+    boxes:  # centroids of the box clusters, in m
+      - [-0.3505, -0.1759]
+    missed_boxes: 0  # boxes without a cluster
+  - scan: 633  # moment b1_52
+    boxes:  # centroids of the box clusters, in m
+      - [-0.4352, -0.3345]
+      - [1.0857, -3.3337]
+    missed_boxes: 0  # boxes without a cluster

@@ -1,0 +1,68 @@
+# Hand labels of the box classification (06/11/2026, one person, partly
+# uncertain). Each entry is the scan closest to a camera image (<= 50 ms).
+# Format and meaning: see README (Evaluation).
+bag: rosbag2_2026_11_03-10_10_39
+frame: laser
+# Labelled area: all clusters in it were reviewed, every predicted box in it
+# that matches no labelled box counts as false positive
+region:
+  heading: -90.0  # in deg, forward = -y of the laser frame (from ICP)
+  half_angle: 75.0  # in deg
+  max_range: 4.0  # in m
+# Scan index ranges [start, end) with the vehicle standing: ICP shift between
+# consecutive scans < 1 mm (~1 cm/s) for at least 6 scans
+static_scans:
+  - [0, 8]
+  - [290, 298]
+  - [417, 425]
+scans:
+  - scan: 21  # moment b2_00
+    boxes:  # centroids of the box clusters, in m
+      - [-0.5875, -0.7160]
+      - [1.1134, -0.7767]
+      - [1.1106, -3.6670]
+    missed_boxes: 0  # boxes without a cluster
+  - scan: 101  # moment b2_05
+    boxes:  # centroids of the box clusters, in m
+      - [1.0591, -0.8382]
+    missed_boxes: 1  # boxes without a cluster
+  - scan: 279  # moment b2_15
+    boxes:  # centroids of the box clusters, in m
+      - [-0.4212, -2.3718]
+      - [1.0278, -3.4378]
+    missed_boxes: 0  # boxes without a cluster
+  - scan: 365  # moment b2_20
+    boxes:  # centroids of the box clusters, in m
+      - [1.9136, -1.9839]
+    missed_boxes: 0  # boxes without a cluster
+  - scan: 498  # moment b2_25
+    boxes: []
+    missed_boxes: 0  # boxes without a cluster
+  - scan: 594  # moment b2_30
+    boxes:  # centroids of the box clusters, in m
+      - [0.4224, -0.4236]
+      - [1.0326, -2.1231]
+    missed_boxes: 1  # boxes without a cluster
+  - scan: 682  # moment b2_35
+    boxes:  # centroids of the box clusters, in m
+      - [-0.2567, -0.6478]
+    missed_boxes: 0  # boxes without a cluster
+  - scan: 766  # moment b2_40
+    boxes:  # centroids of the box clusters, in m
+      - [0.2656, -0.9812]
+      - [-1.5657, -1.0811]
+    missed_boxes: 0  # boxes without a cluster
+  - scan: 854  # moment b2_45
+    boxes:  # centroids of the box clusters, in m
+      - [-0.2514, -0.3727]
+      - [2.2117, -2.6552]
+    missed_boxes: 0  # boxes without a cluster
+  - scan: 967  # moment b2_50
+    boxes:  # centroids of the box clusters, in m
+      - [0.5351, -1.1675]
+      - [-1.8456, -0.7910]
+    missed_boxes: 0  # boxes without a cluster
+  - scan: 1056  # moment b2_55
+    boxes:  # centroids of the box clusters, in m
+      - [0.7626, -1.2325]
+    missed_boxes: 1  # boxes without a cluster
