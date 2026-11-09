@@ -1,3 +1,5 @@
+from dataclasses import asdict, fields
+
 import numpy as np
 import rclpy
 import rclpy.utilities
@@ -9,14 +11,8 @@ from smarty_utils.enums import NodeState
 from smarty_utils.smarty_node import SmartyNode
 from timing import timer
 
-from object_detection_lidar.box_classification import is_box
-from object_detection_lidar.clustering import (
-    DetectedObject,
-    cluster_points,
-    extract_objects,
-    filter_objects,
-)
-from object_detection_lidar.scan_processing import scan_to_points
+from object_detection_lidar.clustering import DetectedObject
+from object_detection_lidar.pipeline import PipelineParams, detect_objects
 
 # Only used for the visualization, the object data is not changed
 MARKER_MIN_SIZE = 0.02  # in m, keeps thin clusters (e.g. one line) visible
@@ -49,18 +45,8 @@ class ObjectDetectionLidarNode(SmartyNode):
                 "points_publisher": "/object_detection_lidar/points",
                 "markers_publisher": "/object_detection_lidar/markers",
                 "objects_publisher": "/object_detection_lidar/objects",
-                # Parameters
-                "min_range": 0.15,  # in m, closer points are ignored (e.g. car body)
-                "max_range": 4.0,  # in m, farther points are ignored
-                "eps": 0.10,  # in m, max. distance of neighboring points (DBSCAN)
-                "min_samples": 3,  # min. number of points of a core point (DBSCAN)
-                "max_object_diameter": 0.6,  # in m, larger objects are dropped (walls)
-                "box_line_tolerance": 0.0023,  # in m, max. RMS distance to a box side
-                "box_line_tolerance_per_m": 0.0015,  # in m/m, added per m distance
-                "box_angle_tolerance": 10.0,  # in deg, max. deviation of a corner
-                "box_corner_tolerance_factor": 2.5,  # line tolerance factor (corner)
-                "box_min_size": 0.08,  # in m, obstacles are at least 0.1 m wide
-                "box_min_fill_ratio": 0.7,  # min. ratio of points to beams on a box
+                # Parameters of the detection, defaults from PipelineParams
+                **asdict(PipelineParams()),
                 "state": NodeState.ACTIVE.value,
                 "debug": False,
             },
@@ -81,59 +67,14 @@ class ObjectDetectionLidarNode(SmartyNode):
         self.get_logger().info("ObjectDetectionLidarNode initialized")
 
     @property
-    def min_range(self) -> float:
-        """Return the minimum range in m."""
-        return self.get_parameter("min_range").value  # type: ignore
-
-    @property
-    def max_range(self) -> float:
-        """Return the maximum range in m."""
-        return self.get_parameter("max_range").value  # type: ignore
-
-    @property
-    def eps(self) -> float:
-        """Return the maximum distance of neighboring points in m (DBSCAN)."""
-        return self.get_parameter("eps").value  # type: ignore
-
-    @property
-    def min_samples(self) -> int:
-        """Return the minimum number of points of a core point (DBSCAN)."""
-        return self.get_parameter("min_samples").value  # type: ignore
-
-    @property
-    def max_object_diameter(self) -> float:
-        """Return the maximum object diameter in m."""
-        return self.get_parameter("max_object_diameter").value  # type: ignore
-
-    @property
-    def box_line_tolerance(self) -> float:
-        """Return the max. RMS distance of the points to a box side at 0 m in m."""
-        return self.get_parameter("box_line_tolerance").value  # type: ignore
-
-    @property
-    def box_line_tolerance_per_m(self) -> float:
-        """Return the increase of the box line tolerance per m of distance."""
-        return self.get_parameter("box_line_tolerance_per_m").value  # type: ignore
-
-    @property
-    def box_angle_tolerance(self) -> float:
-        """Return the max. deviation of a box corner from 90° in deg."""
-        return self.get_parameter("box_angle_tolerance").value  # type: ignore
-
-    @property
-    def box_corner_tolerance_factor(self) -> float:
-        """Return the factor on the line tolerance for the sides of a corner."""
-        return self.get_parameter("box_corner_tolerance_factor").value  # type: ignore
-
-    @property
-    def box_min_size(self) -> float:
-        """Return the min. size of the visible contour of a box in m."""
-        return self.get_parameter("box_min_size").value  # type: ignore
-
-    @property
-    def box_min_fill_ratio(self) -> float:
-        """Return the min. ratio of points to beams within the span of a box."""
-        return self.get_parameter("box_min_fill_ratio").value  # type: ignore
+    def pipeline_params(self) -> PipelineParams:
+        """Return the current parameters of the detection."""
+        return PipelineParams(
+            **{  # type: ignore
+                field.name: self.get_parameter(field.name).value
+                for field in fields(PipelineParams)
+            }
+        )
 
     def scan_callback(self, msg: sensor_msgs.msg.LaserScan) -> None:
         """Executed by the ROS2 system whenever a new scan is received."""
@@ -148,40 +89,22 @@ class ObjectDetectionLidarNode(SmartyNode):
         Args:
             msg: The laser scan message.
         """
-        with timer.Timer(name="scan_to_points", filter_strength=40):
-            points = scan_to_points(
-                np.asarray(msg.ranges),
-                angle_min=msg.angle_min,
-                angle_increment=msg.angle_increment,
-                range_min=max(msg.range_min, self.min_range),
-                range_max=min(msg.range_max, self.max_range),
-            )
+        result = detect_objects(
+            np.asarray(msg.ranges),
+            angle_min=msg.angle_min,
+            angle_increment=msg.angle_increment,
+            range_min=msg.range_min,
+            range_max=msg.range_max,
+            params=self.pipeline_params,
+            step_timer=lambda name: timer.Timer(name=name, filter_strength=40),
+        )
+        points, objects, boxes = result.points, result.objects, result.boxes
 
         with timer.Timer(name="publish", filter_strength=40):
             # The scan is 2D, so all points lie in the plane z = 0 of the scan frame
             points_xyz = np.column_stack((points, np.zeros(len(points))))
             cloud = point_cloud2.create_cloud_xyz32(msg.header, points_xyz.tolist())
             self.points_publisher.publish(cloud)  # type: ignore
-
-        with timer.Timer(name="clustering", filter_strength=40):
-            labels = cluster_points(points, self.eps, self.min_samples)
-            objects = extract_objects(points, labels)
-            objects = filter_objects(objects, self.max_object_diameter)
-
-        with timer.Timer(name="classification", filter_strength=40):
-            boxes = [
-                is_box(
-                    obj.points,
-                    msg.angle_increment,
-                    line_tolerance=self.box_line_tolerance,
-                    line_tolerance_per_m=self.box_line_tolerance_per_m,
-                    angle_tolerance=self.box_angle_tolerance,
-                    corner_tolerance_factor=self.box_corner_tolerance_factor,
-                    min_size=self.box_min_size,
-                    min_fill_ratio=self.box_min_fill_ratio,
-                )
-                for obj in objects
-            ]
 
         with timer.Timer(name="publish_markers", filter_strength=40):
             markers = self.create_markers(msg.header, objects, boxes)
