@@ -20,11 +20,11 @@ The launch file accepts `debug` (default `False`) and `params_file` (default `co
 Every scan is processed by `detect_objects` (`pipeline.py`, independent of ROS):
 
 1. **Points**: drop invalid points and points outside of `[min_range, max_range]` (`scan_processing.py`)
-2. **Clustering**: DBSCAN on the points (`clustering.py`)
-3. **Breakpoint split**: split clusters between consecutive beams at range jumps or gaps of foreign beams, Adaptive Breakpoint Detector (`breakpoint_detection.py`). With `segmentation: abd`, steps 2 and 3 are replaced by a breakpoint segmentation of the whole scan (no DBSCAN)
+2. **Segmentation** (`segmentation: abd`, default): adaptive breakpoint detection on the scan ordered by beam; split between consecutive points at range jumps or gaps of foreign beams, beams without a return count as gap (`breakpoint_detection.py`)
+3. **Optional DBSCAN** (`segmentation: dbscan_abd`): DBSCAN on the points (`clustering.py`), then the clusters are split with the same breakpoint criteria
 4. **Object extraction**: centroid, extents, diameter and the two outermost visible points (left/right endpoint) of each object
 5. **Wall filter**: drop objects with a diameter above `max_object_diameter`
-6. **Region of interest** (optional, `roi_enabled`, off by default): keep only objects whose centroid lies in a fixed rectangle in the vehicle frame
+6. **Region of interest** (`roi_enabled`, on by default): keep only objects whose centroid lies in a rectangle in the vehicle frame around the track and its near surroundings ahead of and next to the vehicle, objects away from the track are dropped
 7. **Shape**: classify objects as box or other by their visible contour (`box_classification.py`); optionally drop non-box objects with a round contour, e.g. legs or bottles (`drop_round_objects`, `shape.py`)
 
 ## Topics
@@ -57,15 +57,16 @@ All parameters with their defaults and explanations are in [`config/ros_params.y
 | Parameter | Default | Description |
 | --- | --- | --- |
 | `min_range`, `max_range` | `0.15`, `4.0` | Valid range of the scan points, in m |
-| `segmentation` | `dbscan_abd` | `dbscan_abd`: DBSCAN, then breakpoint split; `abd`: breakpoint segmentation only |
-| `eps`, `min_samples` | `0.10`, `3` | DBSCAN neighborhood radius (m) and min. points of a core point |
-| `breakpoint_enabled` | `true` | `false` keeps the DBSCAN clusters unsplit |
+| `segmentation` | `abd` | `abd`: breakpoint segmentation of the ordered scan; `dbscan_abd`: DBSCAN, then breakpoint split |
+| `eps`, `min_samples` | `0.10`, `3` | DBSCAN neighborhood radius (m, `dbscan_abd` only) and min. points of an object |
+| `breakpoint_enabled` | `true` | `dbscan_abd` only: `false` keeps the DBSCAN clusters unsplit |
 | `breakpoint_lambda_deg`, `breakpoint_sigma_r` | `10.0`, `0.05` | ABD parameters: smallest angle of incidence (deg), range error (m) |
-| `breakpoint_max_beam_gap` | `3` | Max. number of foreign beams between two consecutive points of an object |
+| `breakpoint_max_beam_gap` | `2` | Max. number of foreign beams between two consecutive points of an object |
+| `breakpoint_count_invalid` | `true` | Beams without a return count as foreign beams |
 | `max_object_diameter` | `0.6` | Wall filter, in m |
 | `box_*` | | Tolerances of the box classification |
 | `laser_yaw`, `lidar_offset_x`, `lidar_offset_y` | `90.0`, `0.0`, `0.0` | Mounting of the LiDAR in the vehicle frame (deg, m) |
-| `roi_enabled`, `roi_x_min` … `roi_y_max` | `false` | Optional region of interest (rectangle in the vehicle frame, m) |
+| `roi_enabled`, `roi_x_min` … `roi_y_max` | `true`, `-0.5` … `3.0` | Region of interest (rectangle in the vehicle frame, m) |
 | `drop_round_objects`, `round_*` | `true` | Filter for round objects and its thresholds |
 | `debug` | `False` | Log the objects and the runtime of each step |
 

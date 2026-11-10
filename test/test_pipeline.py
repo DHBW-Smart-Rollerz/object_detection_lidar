@@ -37,13 +37,19 @@ RANGE_MAX = 12.0  # in m, of the sensor
 # Behavior without region of interest (all valid points are clustered) and
 # without dropping round objects (the scenes contain cylinders)
 NO_ROI = PipelineParams(roi_enabled=False, drop_round_objects=False)
-# Defaults with the optional region of interest switched on
-WITH_ROI = PipelineParams(roi_enabled=True)
-# Default corridor of the node, in the laser frame forward is -y and left is +x
+# Defaults (region of interest switched on)
+WITH_ROI = PipelineParams(drop_round_objects=False)
 # Values per object in the camera format [cls, BLx, BLy, BRx, BRy, score]
 CAMERA_FORMAT_SIZE = 6
 
-ROI = {"x_min": -1.5, "x_max": 3.0, "y_min": -0.8, "y_max": 1.6}
+# Default region of interest of the node in the vehicle frame (x forward, y left),
+# in the laser frame forward is -y and left is +x
+ROI = {
+    "x_min": WITH_ROI.roi_x_min,
+    "x_max": WITH_ROI.roi_x_max,
+    "y_min": WITH_ROI.roi_y_min,
+    "y_max": WITH_ROI.roi_y_max,
+}
 
 
 def scan_ranges(
@@ -278,14 +284,14 @@ def test_step_timer_encloses_every_step():
     [
         ((0.0, -1.0), True),  # 1 m ahead
         ((0.0, -3.0), True),  # front border (inclusive)
-        ((0.0, -3.1), False),  # too far ahead
-        ((0.0, 1.0), True),  # 1 m behind
-        ((0.0, 1.5), True),  # rear border (inclusive)
-        ((0.0, 2.0), False),  # too far behind
-        ((1.5, -1.0), True),  # 1.5 m to the left
-        ((1.7, -1.0), False),  # too far to the left
-        ((-0.8, 1.0), True),  # right border (inclusive), behind
-        ((-1.0, -1.0), False),  # too far to the right
+        ((0.0, -3.01), False),  # too far ahead
+        ((0.0, 0.3), True),  # next to the vehicle, slightly behind the LiDAR
+        ((0.0, 0.5), True),  # rear border (inclusive)
+        ((0.0, 0.51), False),  # too far behind
+        ((3.0, -1.0), True),  # left border (inclusive)
+        ((3.01, -1.0), False),  # too far to the left
+        ((-1.75, -1.0), True),  # right border (inclusive)
+        ((-1.76, -1.0), False),  # too far to the right
     ],
 )
 def test_roi_mask(point: tuple[float, float], inside: bool):
@@ -296,9 +302,9 @@ def test_roi_mask(point: tuple[float, float], inside: bool):
 
 @pytest.mark.parametrize("laser_yaw", [0.0, 90.0, 180.0, -90.0])
 def test_roi_mask_rotation(laser_yaw: float):
-    # Points around a vehicle point 2 m ahead and 1 m left (inside), and 2 m ahead
-    # and 1 m right (outside), expressed in a laser frame rotated by laser_yaw
-    vehicle = np.array([[2.0, 1.0], [2.0, -1.0]])
+    # A vehicle point 2 m ahead and 1 m left (inside), and one 2 m ahead and 2 m
+    # right (outside), expressed in a laser frame rotated by laser_yaw
+    vehicle = np.array([[2.0, 1.0], [2.0, -2.0]])
     yaw = np.radians(laser_yaw)
     c, s = np.cos(yaw), np.sin(yaw)
     # Inverse rotation (row vectors times R equals R transposed times columns)
@@ -313,15 +319,20 @@ def test_roi_mask_empty():
     assert roi_mask(np.empty((0, 2)), 90.0, **ROI).shape == (0,)
 
 
-def test_scene_with_roi():
+def roi_scene() -> np.ndarray:
+    """Return a scan of four boxes, two inside and two outside of the ROI."""
     # Boxes in the laser frame: forward is -y, left is +x
     segments = [
         *rectangle((0.0, -2.0), 0.2, 0.2, 0.0),  # 2 m ahead: kept
-        *rectangle((0.3, 1.0), 0.2, 0.2, 0.0),  # 1 m behind, left: kept
-        *rectangle((-2.0, -1.0), 0.2, 0.2, 0.0),  # 2 m to the right: dropped
-        *rectangle((-0.3, 2.2), 0.2, 0.2, 0.0),  # 2.1 m behind: dropped
+        *rectangle((2.5, -1.0), 0.2, 0.2, 0.0),  # 1 m ahead, 2.5 m left: kept
+        *rectangle((0.3, 1.0), 0.2, 0.2, 0.0),  # 1 m behind: dropped
+        *rectangle((-2.2, -1.0), 0.2, 0.2, 0.0),  # 2.2 m to the right: dropped
     ]
-    ranges = scan_ranges(segments)
+    return scan_ranges(segments)
+
+
+def test_scene_with_roi():
+    ranges = roi_scene()
 
     result = run(ranges, WITH_ROI)
 
@@ -330,26 +341,17 @@ def test_scene_with_roi():
     # Centroids of the visible sides facing the sensor
     centroids = sorted((obj.centroid_x, obj.centroid_y) for obj in result.objects)
     assert len(centroids) == 2
-    np.testing.assert_allclose(centroids, [(0.0, -1.9), (0.3, 0.9)], atol=0.03)
+    np.testing.assert_allclose(centroids, [(0.0, -1.9), (2.43, -0.97)], atol=0.03)
     # Without region of interest all four boxes are found
     assert len(run(ranges, NO_ROI).objects) == 4
 
 
-def test_roi_disabled_by_default():
-    # Same scene: by default (roi_enabled false) all four boxes are kept, also
-    # the ones to the side and behind; switched on, the corridor still filters
-    segments = [
-        *rectangle((0.0, -2.0), 0.2, 0.2, 0.0),  # 2 m ahead
-        *rectangle((0.3, 1.0), 0.2, 0.2, 0.0),  # 1 m behind, left
-        *rectangle((-2.0, -1.0), 0.2, 0.2, 0.0),  # 2 m to the right
-        *rectangle((-0.3, 2.2), 0.2, 0.2, 0.0),  # 2.1 m behind
-    ]
-    ranges = scan_ranges(segments)
+def test_roi_enabled_by_default():
+    ranges = roi_scene()
 
-    assert PipelineParams().roi_enabled is False
-    default = run(ranges, PipelineParams())
-    assert len(default.objects) == 4
-    assert len(run(ranges, WITH_ROI).objects) == 2
+    assert PipelineParams().roi_enabled is True
+    assert len(run(ranges, PipelineParams()).objects) == 2
+    assert len(run(ranges, replace(WITH_ROI, roi_enabled=False)).objects) == 4
 
 
 def vehicle_to_laser(x: float, y: float) -> np.ndarray:
@@ -358,10 +360,10 @@ def vehicle_to_laser(x: float, y: float) -> np.ndarray:
 
 
 def test_barrier_crossing_the_border_is_no_box():
-    # Straight barrier right of the track, slightly diagonal: from 1 m ahead and
-    # 0.72 m right to 3 m ahead and 1 m right. It crosses the right border
-    # (0.8 m) 1.57 m ahead, the part inside is 0.57 m long.
-    barrier = [(vehicle_to_laser(1.0, -0.72), vehicle_to_laser(3.0, -1.0))]
+    # Straight barrier right of the track, slightly diagonal: from 1.2 m ahead and
+    # 1.69 m right to 3.2 m ahead and 1.99 m right. It crosses the right border
+    # (1.75 m) 1.6 m ahead, the part inside is 0.4 m long.
+    barrier = [(vehicle_to_laser(1.2, -1.69), vehicle_to_laser(3.2, -1.99))]
     ranges = scan_ranges(barrier)
     params = WITH_ROI
 
@@ -396,11 +398,11 @@ def test_barrier_crossing_the_border_is_no_box():
 
 def test_object_is_filtered_by_its_centroid():
     # Two boxes 0.3 x 0.3 m, the centroid is the one of the visible contour. The
-    # first one is at 0.7 m right (inside) with points beyond the right border
-    # (0.8 m), the second one at ~1.75 m left (outside, border at 1.6 m).
+    # first one is at 1.65 m right (inside) with points beyond the right border
+    # (1.75 m), the second one at ~3.15 m left (outside, border at 3.0 m).
     segments = [
-        *rectangle(tuple(vehicle_to_laser(1.5, -0.7)), 0.3, 0.3, 0.0),
-        *rectangle(tuple(vehicle_to_laser(2.0, 1.9)), 0.3, 0.3, 0.0),
+        *rectangle(tuple(vehicle_to_laser(1.5, -1.65)), 0.3, 0.3, 0.0),
+        *rectangle(tuple(vehicle_to_laser(2.0, 3.3)), 0.3, 0.3, 0.0),
     ]
     ranges = scan_ranges(segments)
 
@@ -412,7 +414,7 @@ def test_object_is_filtered_by_its_centroid():
     # The kept object is complete, including its points outside the corridor
     kept = next(obj for obj in complete.objects if obj.centroid_x < 0)  # right
     assert result.objects[0] == kept
-    assert kept.min_x < -0.8  # laser x = vehicle y
+    assert kept.min_x < -1.75  # laser x = vehicle y
     np.testing.assert_array_equal(result.objects[0].points, kept.points)
 
 

@@ -50,17 +50,17 @@ class PipelineParams:
     """
 
     # Segmentation of the points into objects, one of SEGMENTATIONS
-    segmentation: str = "dbscan_abd"
+    segmentation: str = "abd"
     min_range: float = 0.15  # in m, closer points are ignored (e.g. car body)
     max_range: float = 4.0  # in m, farther points are ignored
     eps: float = 0.10  # in m, max. distance of neighboring points (DBSCAN)
     min_samples: int = 3  # min. number of points of a core point (DBSCAN)
-    # Splitting of the clusters at breakpoints (split_clusters)
-    breakpoint_enabled: bool = True  # False keeps the DBSCAN clusters
+    # Breakpoint detection (segment_scan, or split_clusters after DBSCAN)
+    breakpoint_enabled: bool = True  # dbscan_abd only, False keeps the clusters
     breakpoint_lambda_deg: float = 10.0  # in deg, min. angle of incidence
     breakpoint_sigma_r: float = 0.05  # in m, range error (incl. edge artifacts)
-    breakpoint_max_beam_gap: int = 3  # max. number of foreign beams in a cluster
-    breakpoint_count_invalid: bool = False  # beams without return count as foreign
+    breakpoint_max_beam_gap: int = 2  # max. number of foreign beams in a cluster
+    breakpoint_count_invalid: bool = True  # beams without return count as foreign
     max_object_diameter: float = 0.6  # in m, larger objects are dropped (walls)
     box_line_tolerance: float = 0.0023  # in m, max. RMS distance to a box side
     box_line_tolerance_per_m: float = 0.0015  # in m/m, added per m of distance
@@ -73,12 +73,12 @@ class PipelineParams:
     laser_yaw: float = 90.0  # in deg, yaw of the laser frame in the vehicle frame
     lidar_offset_x: float = 0.0  # in m, placeholder until measured
     lidar_offset_y: float = 0.0  # in m, placeholder until measured
-    # Region of interest: fixed rectangle in the vehicle frame
-    roi_x_min: float = -1.5  # in m, behind the vehicle
-    roi_x_max: float = 4.0  # in m, ahead of the vehicle
-    roi_y_min: float = -0.8  # in m, right of the vehicle
-    roi_y_max: float = 1.6  # in m, left of the vehicle
-    roi_enabled: bool = False  # True keeps only objects in the corridor
+    # Region of interest: fixed rectangle in the vehicle frame around the track
+    roi_x_min: float = -0.5  # in m, rear edge
+    roi_x_max: float = 3.0  # in m, front edge
+    roi_y_min: float = -1.75  # in m, right edge
+    roi_y_max: float = 3.0  # in m, left edge
+    roi_enabled: bool = True  # False keeps all objects
     # Round objects (no CAuDri obstacle, see shape.py), the noise of the circle
     # fit is box_line_tolerance + box_line_tolerance_per_m * distance
     drop_round_objects: bool = True  # False keeps round objects

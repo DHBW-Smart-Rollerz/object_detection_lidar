@@ -21,11 +21,11 @@ from test_pipeline import (
 LAMBDA = np.radians(10.0)
 SIGMA_R = 0.01
 # The round objects (cylinders) of the scenes are kept, only the segmentation
-# is tested here
-NO_ROI = PipelineParams(roi_enabled=False, drop_round_objects=False)
-NO_SPLIT = replace(NO_ROI, breakpoint_enabled=False)
-# Segmentation by breakpoints only (no DBSCAN)
-ABD = replace(NO_ROI, segmentation="abd")
+# is tested here. Default segmentation: breakpoints only (abd, no DBSCAN)
+ABD = PipelineParams(roi_enabled=False, drop_round_objects=False)
+# Optional segmentation: DBSCAN, then split_clusters, with dropouts bridged
+DBSCAN_ABD = replace(ABD, segmentation="dbscan_abd", breakpoint_count_invalid=False)
+NO_SPLIT = replace(DBSCAN_ABD, breakpoint_enabled=False)
 # Beam layout of the RPLIDAR A2M12 as in recorded scans: the
 # scan does not close the circle exactly, the last beam is ~1° before the first
 REAL_ANGLE_MIN = -3.1241390705108643
@@ -44,7 +44,7 @@ def noisy(ranges: np.ndarray, angle_min: float, angle_increment: float, seed: in
 
 def detect(
     segments: list[tuple[np.ndarray, np.ndarray]],
-    params: PipelineParams = NO_ROI,
+    params: PipelineParams = DBSCAN_ABD,
     angle_min: float = ANGLE_MIN,
     angle_increment: float = ANGLE_INCREMENT,
     seed: int = 0,
@@ -137,7 +137,7 @@ def test_depth_jump_splits_with_a_tight_range_error(sigma_r: float, num_objects:
         *rectangle((1.0, 0.08), 0.16, 0.1, 0.0),
         *rectangle((1.08, -0.06), 0.2, 0.1, 0.0),
     ]
-    params = replace(NO_ROI, breakpoint_sigma_r=sigma_r)
+    params = replace(DBSCAN_ABD, breakpoint_sigma_r=sigma_r)
 
     assert len(detect(segments, NO_SPLIT)) == 1
     assert len(detect(segments, params)) == num_objects
@@ -155,7 +155,7 @@ def test_range_artifact_on_a_flat_face_is_not_split():
     ranges[middle : middle + 10] -= np.linspace(0.07, 0.01, 10)
 
     result = detect_objects(
-        ranges, ANGLE_MIN, ANGLE_INCREMENT, RANGE_MIN, RANGE_MAX, params=NO_ROI
+        ranges, ANGLE_MIN, ANGLE_INCREMENT, RANGE_MIN, RANGE_MAX, params=DBSCAN_ABD
     )
 
     assert len(result.objects) == 1
@@ -244,7 +244,7 @@ def test_dropout_on_an_object_is_bridged():
     hit = np.flatnonzero(np.isfinite(ranges))
     middle = hit[len(hit) // 2]
     ranges[middle - 5 : middle + 6] = np.inf
-    counted = replace(NO_ROI, breakpoint_count_invalid=True)
+    counted = replace(DBSCAN_ABD, breakpoint_count_invalid=True)
 
     def count(params: PipelineParams) -> int:
         result = detect_objects(
@@ -252,7 +252,7 @@ def test_dropout_on_an_object_is_bridged():
         )
         return len(result.objects)
 
-    assert count(NO_ROI) == 1
+    assert count(DBSCAN_ABD) == 1
     assert count(counted) == 2
 
 
@@ -533,7 +533,10 @@ def test_abd_noise_points_are_dropped():
     assert (surface >= 0).all()
 
 
-def test_abd_dropout_on_an_object_is_bridged():
+@pytest.mark.parametrize(("count_invalid", "num_objects"), [(True, 2), (False, 1)])
+def test_abd_dropout_on_an_object(count_invalid: bool, num_objects: int):
+    # Dark stripe of 11 beams without a return on a box at 0.35 m: by default
+    # (count_invalid) the beams count as a gap and split the box, false bridges it
     segments = [*rectangle(polar(0.4, -30.0), 0.2, 0.1, np.radians(-30.0))]
     ranges = noisy(scan_ranges(segments), ANGLE_MIN, ANGLE_INCREMENT, 0)
     hit = np.flatnonzero(np.isfinite(ranges))
@@ -541,10 +544,35 @@ def test_abd_dropout_on_an_object_is_bridged():
     ranges[middle - 5 : middle + 6] = np.inf
 
     result = detect_objects(
-        ranges, ANGLE_MIN, ANGLE_INCREMENT, RANGE_MIN, RANGE_MAX, params=ABD
+        ranges,
+        ANGLE_MIN,
+        ANGLE_INCREMENT,
+        RANGE_MIN,
+        RANGE_MAX,
+        params=replace(ABD, breakpoint_count_invalid=count_invalid),
     )
 
-    assert len(result.objects) == 1
+    assert len(result.objects) == num_objects
+
+
+@pytest.mark.parametrize(("missing", "segments"), [(2, 1), (3, 2)])
+def test_abd_invalid_beams_count_as_gap(missing: int, segments: int):
+    # Default (count_invalid, returns None): beams without a return between two
+    # parts of one surface are bridged up to max_beam_gap (2) and split above
+    indices = np.concatenate((np.arange(10), np.arange(10 + missing, 20 + missing)))
+
+    labels = segment(unit_circle(indices), indices, max_beam_gap=2, returns=None)
+
+    assert len(np.unique(labels)) == segments
+    assert (labels >= 0).all()
+
+
+def test_default_segmentation():
+    params = PipelineParams()
+
+    assert params.segmentation == "abd"
+    assert params.breakpoint_count_invalid is True
+    assert params.breakpoint_max_beam_gap == 2
 
 
 def test_abd_without_breakpoint_is_one_segment():
