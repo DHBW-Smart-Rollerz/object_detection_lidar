@@ -78,7 +78,7 @@ class PipelineParams:
     roi_x_max: float = 4.0  # in m, ahead of the vehicle
     roi_y_min: float = -0.8  # in m, right of the vehicle
     roi_y_max: float = 1.6  # in m, left of the vehicle
-    roi_enabled: bool = True  # False keeps all objects
+    roi_enabled: bool = False  # True keeps only objects in the corridor
     # Round objects (no CAuDri obstacle, see shape.py), the noise of the circle
     # fit is box_line_tolerance + box_line_tolerance_per_m * distance
     drop_round_objects: bool = True  # False keeps round objects

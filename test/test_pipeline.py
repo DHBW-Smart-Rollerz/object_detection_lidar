@@ -28,7 +28,7 @@ from test_box_classification import add_noise, circle, rectangle
 
 CONFIG = Path(__file__).resolve().parents[1] / "config" / "ros_params.yaml"
 
-# Beam layout of the RPLIDAR A2M12 in the rosbags of 03/11/2026
+# Beam layout of the RPLIDAR A2M12 (typical values from recorded scans)
 NUM_BEAMS = 1800
 ANGLE_MIN = -np.pi  # in rad
 ANGLE_INCREMENT = 2 * np.pi / NUM_BEAMS  # in rad
@@ -37,7 +37,9 @@ RANGE_MAX = 12.0  # in m, of the sensor
 # Behavior without region of interest (all valid points are clustered) and
 # without dropping round objects (the scenes contain cylinders)
 NO_ROI = PipelineParams(roi_enabled=False, drop_round_objects=False)
-# Default corridor of the node, in the rosbags forward is -y and left is +x
+# Defaults with the optional region of interest switched on
+WITH_ROI = PipelineParams(roi_enabled=True)
+# Default corridor of the node, in the laser frame forward is -y and left is +x
 # Values per object in the camera format [cls, BLx, BLy, BRx, BRy, score]
 CAMERA_FORMAT_SIZE = 6
 
@@ -321,7 +323,7 @@ def test_scene_with_roi():
     ]
     ranges = scan_ranges(segments)
 
-    result = run(ranges, PipelineParams())
+    result = run(ranges, WITH_ROI)
 
     # The points are not filtered, only the objects
     np.testing.assert_array_equal(result.points, run(ranges, NO_ROI).points)
@@ -331,6 +333,23 @@ def test_scene_with_roi():
     np.testing.assert_allclose(centroids, [(0.0, -1.9), (0.3, 0.9)], atol=0.03)
     # Without region of interest all four boxes are found
     assert len(run(ranges, NO_ROI).objects) == 4
+
+
+def test_roi_disabled_by_default():
+    # Same scene: by default (roi_enabled false) all four boxes are kept, also
+    # the ones to the side and behind; switched on, the corridor still filters
+    segments = [
+        *rectangle((0.0, -2.0), 0.2, 0.2, 0.0),  # 2 m ahead
+        *rectangle((0.3, 1.0), 0.2, 0.2, 0.0),  # 1 m behind, left
+        *rectangle((-2.0, -1.0), 0.2, 0.2, 0.0),  # 2 m to the right
+        *rectangle((-0.3, 2.2), 0.2, 0.2, 0.0),  # 2.1 m behind
+    ]
+    ranges = scan_ranges(segments)
+
+    assert PipelineParams().roi_enabled is False
+    default = run(ranges, PipelineParams())
+    assert len(default.objects) == 4
+    assert len(run(ranges, WITH_ROI).objects) == 2
 
 
 def vehicle_to_laser(x: float, y: float) -> np.ndarray:
@@ -344,7 +363,7 @@ def test_barrier_crossing_the_border_is_no_box():
     # (0.8 m) 1.57 m ahead, the part inside is 0.57 m long.
     barrier = [(vehicle_to_laser(1.0, -0.72), vehicle_to_laser(3.0, -1.0))]
     ranges = scan_ranges(barrier)
-    params = PipelineParams()
+    params = WITH_ROI
 
     result = run(ranges, params)
 
@@ -385,7 +404,7 @@ def test_object_is_filtered_by_its_centroid():
     ]
     ranges = scan_ranges(segments)
 
-    result = run(ranges, PipelineParams())
+    result = run(ranges, WITH_ROI)
     complete = run(ranges, NO_ROI)
 
     assert len(complete.objects) == 2

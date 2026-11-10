@@ -26,14 +26,14 @@ NO_ROI = PipelineParams(roi_enabled=False, drop_round_objects=False)
 NO_SPLIT = replace(NO_ROI, breakpoint_enabled=False)
 # Segmentation by breakpoints only (no DBSCAN)
 ABD = replace(NO_ROI, segmentation="abd")
-# Beam layout of the RPLIDAR A2M12 as published in the rosbags of 03/11/2026: the
+# Beam layout of the RPLIDAR A2M12 as in recorded scans: the
 # scan does not close the circle exactly, the last beam is ~1° before the first
 REAL_ANGLE_MIN = -3.1241390705108643
 REAL_ANGLE_INCREMENT = 0.0034828970674425364
 
 
 def noisy(ranges: np.ndarray, angle_min: float, angle_increment: float, seed: int):
-    """Add the range noise of the rosbags to the valid beams."""
+    """Add range noise typical of recorded scans to the valid beams."""
     ranges = ranges.copy()
     valid = np.isfinite(ranges)
     angles = angle_min + np.flatnonzero(valid) * angle_increment
@@ -144,7 +144,7 @@ def test_depth_jump_splits_with_a_tight_range_error(sigma_r: float, num_objects:
 
 
 def test_range_artifact_on_a_flat_face_is_not_split():
-    # Carton of 0.3 m at 0.9 m like in the rosbags of 09/11/2026: on 20 beams in
+    # Flat box of 0.3 m at 0.9 m with a typical sensor artifact: on 20 beams in
     # the middle of the face the range is off by up to +6 cm and then -7 cm, with a
     # jump of 13 cm between two neighboring beams
     segments = [*rectangle((0.94, 0.0), 0.3, 0.08, 0.0), *background()]

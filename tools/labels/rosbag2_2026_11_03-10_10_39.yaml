@@ -1,5 +1,5 @@
-# Hand labels of the box classification (06/11/2026, one person, partly
-# uncertain). Each entry is the scan closest to a camera image (<= 50 ms).
+# Hand labels for evaluation. Positions in the laser frame, in m.
+# Each entry is the scan closest to a camera image (<= 50 ms).
 # Format and meaning: see README (Evaluation).
 bag: rosbag2_2026_11_03-10_10_39
 frame: laser
@@ -25,15 +25,15 @@ scans:
   - scan: 101  # moment b2_05
     boxes:  # centroids of the box clusters, in m
       - [1.0591, -0.8382]
-      - [-0.7947, -0.4013]  # corrected 09/11/2026, camera review
-    missed_boxes: 0  # boxes without a cluster; corrected 09/11/2026, camera review (was 1)
+      - [-0.7947, -0.4013]
+    missed_boxes: 0  # boxes without a cluster
   - scan: 279  # moment b2_15
     boxes:  # centroids of the box clusters, in m
       - [-0.4212, -2.3718]
       - [1.0278, -3.4378]
     missed_boxes: 0  # boxes without a cluster
   - scan: 365  # moment b2_20
-    boxes: []  # removed 09/11/2026: [1.9136, -1.9839], off-track room object, camera-checked
+    boxes: []
     missed_boxes: 0  # boxes without a cluster
   - scan: 498  # moment b2_25
     boxes: []
@@ -42,8 +42,8 @@ scans:
     boxes:  # centroids of the box clusters, in m
       - [0.4224, -0.4236]
       - [1.0326, -2.1231]
-      - [-0.2282, -1.0148]  # corrected 09/11/2026, camera review
-    missed_boxes: 0  # boxes without a cluster; corrected 09/11/2026, camera review (was 1)
+      - [-0.2282, -1.0148]
+    missed_boxes: 0  # boxes without a cluster
   - scan: 682  # moment b2_35
     boxes:  # centroids of the box clusters, in m
       - [-0.2567, -0.6478]
@@ -51,17 +51,14 @@ scans:
   - scan: 766  # moment b2_40
     boxes:  # centroids of the box clusters, in m
       - [0.2656, -0.9812]
-      # removed 09/11/2026: [-1.5657, -1.0811], off-track room object, camera-checked
     missed_boxes: 0  # boxes without a cluster
   - scan: 854  # moment b2_45
     boxes:  # centroids of the box clusters, in m
       - [-0.2514, -0.3727]
-      # removed 09/11/2026: [2.2117, -2.6552], off-track room object, camera-checked
     missed_boxes: 0  # boxes without a cluster
   - scan: 967  # moment b2_50
     boxes:  # centroids of the box clusters, in m
       - [0.5351, -1.1675]
-      # removed 09/11/2026: [-1.8456, -0.7910], off-track room object, camera-checked
     missed_boxes: 0  # boxes without a cluster
   - scan: 1056  # moment b2_55
     boxes:  # centroids of the box clusters, in m

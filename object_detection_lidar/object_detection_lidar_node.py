@@ -150,8 +150,8 @@ class ObjectDetectionLidarNode(SmartyNode):
 
         with timer.Timer(name="publish_object", filter_strength=40):
             # Same format as the camera (/object_detection/object), so the fusion
-            # can read both sensors alike. Only the objects in the region of
-            # interest (all with roi_enabled false), an empty array for no object.
+            # can read both sensors alike. All objects (only those in the region
+            # of interest with roi_enabled true), an empty array for no object.
             object_msg = std_msgs.msg.Float32MultiArray()
             object_msg.data = camera_format(objects, params).tolist()
             self.object_publisher.publish(object_msg)  # type: ignore

@@ -24,7 +24,7 @@ SEEDS = range(10)
 def scan(
     segments: list[tuple[np.ndarray, np.ndarray]], seed: int, noise_factor: float = 1.0
 ) -> np.ndarray:
-    """Raycast the segments and add range noise (0.5 mm + 1.5 mm/m, rosbags)."""
+    """Raycast the segments and add range noise (0.5 mm + 1.5 mm/m, recorded scans)."""
     points = raycast(segments)
     ranges = np.linalg.norm(points, axis=1)
     sigma = noise_factor * (0.0005 + 0.0015 * ranges)

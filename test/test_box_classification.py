@@ -77,7 +77,7 @@ def circle(
 
 
 def add_noise(points: np.ndarray, seed: int = 0) -> np.ndarray:
-    """Add range noise like in the rosbags (0.5 mm + 1.5 mm per m distance)."""
+    """Add range noise like in recorded scans (0.5 mm + 1.5 mm per m distance)."""
     ranges = np.linalg.norm(points, axis=1)
     sigma = 0.0005 + 0.0015 * ranges
     noisy = ranges + np.random.default_rng(seed).normal(0.0, 1.0, len(ranges)) * sigma

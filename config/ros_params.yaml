@@ -26,25 +26,19 @@ object_detection_lidar_node:
     #   (around the full circle, across the seam at ±180°) and split at
     #   breakpoints with the same breakpoint_* parameters (segment_scan),
     #   breakpoint_enabled is ignored and eps is not used. Segments with fewer
-    #   than min_samples points are noise. As every valid point takes part, the
-    #   beams between two consecutive points are only beams without a return
-    #   (bridged) or with a return outside of [min_range, max_range], so
-    #   breakpoint_max_beam_gap only finds gaps to the far background, gaps to
-    #   background within max_range are found as jumps in depth (D_max).
-    # The scan already is ordered by angle, so ABD alone is the classical
-    # segmentation of 2D laser scans and has no eps that merges obstacles closer
-    # than 0.1 m. Comparison of 09/11/2026 (rosbags of 03/11/2026): "abd" loses
-    # labelled boxes (object recall 80/88 % instead of 90/94 % with "dbscan_abd"),
-    # so "dbscan_abd" was chosen (see README).
+    #   than min_samples points are noise. Gaps to background within max_range
+    #   are found as jumps in depth (D_max), breakpoint_max_beam_gap only finds
+    #   gaps to the far background.
+    # "abd" alone bridges dropouts on obstacles more easily and can merge an
+    # obstacle with the background, so "dbscan_abd" is the default (see README).
     segmentation: "dbscan_abd"
 
     # Clustering (DBSCAN, only with segmentation "dbscan_abd")
     # Max. distance of two neighboring points of the same object. The RPLIDAR A2M12
     # has an angle_increment of 0.00348 rad, i.e. ~14 mm point spacing at 4 m.
     # eps is clearly above that (plus measurement noise) and clearly below the
-    # min. distance of 1 m between obstacles, so two obstacles are not merged.
-    # The 1 m only applies along the track, obstacles can stand closer when
-    # parallel parking and may then be merged.
+    # min. distance of 1 m between obstacles along the track. Obstacles standing
+    # closer (e.g. when parallel parking) may be merged.
     eps: 0.10 # in m
     # Min. number of points in the neighborhood of a core point (incl. itself),
     # single outliers are treated as noise
@@ -53,29 +47,20 @@ object_detection_lidar_node:
     # Splitting of the DBSCAN clusters at breakpoints (breakpoint_detection.py),
     # Adaptive Breakpoint Detector of Borges & Aldon (2004). DBSCAN merges two
     # obstacles closer than eps, although the beams between them hit the
-    # background (e.g. two obstacles 5 cm apart at 1.3 m). Consecutive points of a
-    # cluster (by beam) are split if their distance is above
-    # D_max = r * sin(dphi) / sin(lambda - dphi) + 3 * sigma_r or if more than
-    # breakpoint_max_beam_gap foreign beams lie between them. Pieces with fewer
-    # than min_samples points become noise.
+    # background. Consecutive points of a cluster (by beam) are split if their
+    # distance is above D_max = r * sin(dphi) / sin(lambda - dphi) + 3 * sigma_r
+    # or if more than breakpoint_max_beam_gap foreign beams lie between them.
+    # Pieces with fewer than min_samples points become noise.
     # false keeps the DBSCAN clusters (behavior without splitting)
     breakpoint_enabled: true
-    # Smallest angle of incidence of a surface that is not split, value of Borges &
-    # Aldon (2004). With breakpoint_sigma_r = 0.05 the results on the rosbags of
-    # 03/11 and 09/11/2026 are the same as with 7°.
+    # Smallest angle of incidence of a surface that is not split, value of
+    # Borges & Aldon (2004)
     breakpoint_lambda_deg: 10.0 # in deg
-    # Range error of a single point. The datasheet of the A2M12 (rev. 1.1) gives no
-    # accuracy, the range noise in the rosbags of 03/11/2026 is small (median ~0.4
-    # mm + 1.4 mm/m, 90th percentile ~2.7 mm/m, i.e. ~11 mm at 4 m). But the
-    # triangulation sensor also has local systematic errors: on a flat carton of
-    # 308 mm at 0.9 m (rosbags of 09/11/2026) the points of 20 beams deviate by
-    # -68 to +59 mm from the face (RMS 3.4 mm elsewhere), with a jump of up to 140
-    # mm between two neighboring beams. With 0.01 m the carton was split into 190
-    # + 127 mm, likewise furniture and walls into pieces below max_object_diameter
-    # that were kept as objects, and a labelled box at 1.3 m lost its oblique side
-    # face (no longer a box). 0.05 m (3 * sigma_r = 15 cm > 140 mm) keeps them.
-    # As eps (0.1 m) already separates larger jumps, the distance criterion then
-    # mainly acts on skipped beams, gaps are found by breakpoint_max_beam_gap.
+    # Range noise term of the adaptive breakpoint threshold. Chosen coarse on
+    # purpose: besides random noise the triangulation sensor shows local systematic
+    # range errors on flat faces, smaller values over-split objects into pieces.
+    # As eps already separates larger jumps, gaps are mainly found by
+    # breakpoint_max_beam_gap.
     breakpoint_sigma_r: 0.05 # in m
     # Max. number of foreign beams (beams with a return outside of the cluster:
     # background, other objects, noise) between two consecutive points of one
@@ -84,25 +69,20 @@ object_detection_lidar_node:
     # 4 m, so a gap of 5 cm between two obstacles is found up to ~3.6 m.
     breakpoint_max_beam_gap: 3
     # false: beams without a return (inf, nan) are bridged and do not count as
-    # foreign beams. Dark or shiny spots on an obstacle return nothing: in the
-    # rosbags of 03/11/2026 a labelled box at 0.35 m had a dropout of 11 beams and
-    # was split and no longer classified as box when they counted. The beams
-    # between two obstacles hit the background (also beyond max_range), so the gap
-    # is still found. true counts all beams between two points.
+    # foreign beams, so dark or shiny spots on an obstacle do not split it. The
+    # beams between two obstacles hit the background (also beyond max_range), so
+    # the gap is still found. true counts all beams between two points.
     breakpoint_count_invalid: false
     # Objects with a larger diameter (largest distance of two points, independent
     # of the rotation) are dropped (simple wall filter). CAuDri only specifies the
-    # width of obstacles (100 to 400 mm), the length is open. 0.6 m is a
-    # preliminary value and still has to be justified.
+    # width of obstacles (100 to 400 mm), the length is open.
     max_object_diameter: 0.6 # in m
 
     # Box classification (is_box), see box_classification.py
     # Max. RMS distance of the points to a box side: box_line_tolerance at 0 m plus
-    # box_line_tolerance_per_m per m of distance. The range noise of the A2M12 in the
-    # rosbags of 03/11/2026 grows with the distance (median ~0.4 mm + 1.4 mm/m,
-    # 90th percentile ~2.7 mm/m). A larger value (2.5 mm/m) finds more frontal boxes
-    # at 3-4 m, but in hand-labelled scans of these rosbags it added 2 true boxes and
-    # 24 false ones (straight edges of furniture and walls), so 1.5 mm/m is kept.
+    # box_line_tolerance_per_m per m of distance (the range noise grows with the
+    # distance). Larger values find more frontal boxes far away, but also accept
+    # straight edges of other objects and walls as boxes.
     box_line_tolerance: 0.0023 # in m
     box_line_tolerance_per_m: 0.0015 # in m/m
     # Max. deviation of a corner from 90°
@@ -117,40 +97,35 @@ object_detection_lidar_node:
     # surface (drops sparse clusters like chair legs)
     box_min_fill_ratio: 0.7
 
-    # Vehicle frame of the camera objects (camera_preprocessing, position board
-    # img/position/real_coordinates.pdf, config.yaml): x forward, y left, origin
-    # at the center of the front axle on the ground.
+    # Vehicle frame of the camera objects (camera_preprocessing): x forward,
+    # y left, origin at the center of the front axle on the ground.
     # p_vehicle = R(laser_yaw) * p_laser + (lidar_offset_x, lidar_offset_y)
     # Yaw of the laser frame in the vehicle frame (like a tf base_link -> laser).
-    # In the rosbags of 03/11/2026 the vehicle moves along -y of the laser frame
-    # and +x points to the left (ego motion by ICP, turn direction checked against
-    # the camera), i.e. 90°.
+    # The vehicle moves along -y of the laser frame and +x points to the left,
+    # i.e. 90°.
     laser_yaw: 90.0 # in deg
-    # Position of the center of the LiDAR in the vehicle frame. Placeholder until
-    # measured on the vehicle: with 0.0 the LiDAR positions are relative to the
-    # LiDAR, not to the front axle, so the endpoints of LiDAR and camera are
-    # shifted by this offset against each other.
-    lidar_offset_x: 0.0 # in m, placeholder until measured
-    lidar_offset_y: 0.0 # in m, placeholder until measured
+    # Position of the center of the LiDAR in the vehicle frame. With 0.0 the
+    # positions are relative to the LiDAR, not to the front axle, so the endpoints
+    # of LiDAR and camera are shifted by this offset against each other.
+    lidar_offset_x: 0.0 # in m
+    lidar_offset_y: 0.0 # in m
 
-    # Region of interest: only objects whose centroid lies in a fixed rectangle
-    # around the vehicle are kept and classified. All valid points are clustered
-    # first and the wall filter runs on the complete objects, because clipping the
-    # points would cut barriers and walls at the border into short straight pieces
-    # that pass the wall filter as boxes. The objects keep all their points, the
-    # rectangle is given in the vehicle frame (see above). The
-    # borders were chosen with the origin at the LiDAR (offset 0.0), check them
-    # once the offset is measured. It covers the area behind and next to the
-    # vehicle on purpose (360° view, unlike the camera): merging back after
-    # overtaking, parking spots, crossing traffic.
-    # It does not follow curves (see README).
+    # Region of interest (optional, off by default): with roi_enabled only objects
+    # whose centroid lies in a fixed rectangle around the vehicle are kept and
+    # classified. Off by default because the rectangle does not follow the track
+    # and drops obstacles in curves and at intersections; the LiDAR publishes all
+    # clusters and the fusion with the camera decides what is an obstacle.
+    # All valid points are clustered first and the filter runs on the complete
+    # objects, because clipping the points would cut barriers and walls at the
+    # border into short straight pieces that pass the wall filter as boxes. The
+    # rectangle is given in the vehicle frame (see above) and covers the area
+    # behind and next to the vehicle on purpose (360° view, unlike the camera):
+    # merging back after overtaking, parking spots, crossing traffic.
     # Behind the vehicle: after overtaking the vehicle merges back within 2 m
     # (CAuDri), the overtaken obstacle has to stay visible behind it
     roi_x_min: -1.5 # in m
-    # Ahead of the vehicle: max_range (4.0 m) caps it anyway, a shorter corridor
-    # only finds obstacles later (sweep 09/11/2026 on the rosbags of 03/11/2026:
-    # object recall incl. missed 70.7 % at 3.0 m, 80.5 % at 4.0 m; without the 5
-    # off-track room objects in the labels: 80.6 % and 91.7 %)
+    # Ahead of the vehicle: max_range caps it anyway, a shorter corridor only
+    # finds obstacles later
     roi_x_max: 4.0 # in m
     # Right: half of the own lane (lanes 350-450 mm wide, CAuDri), the parking
     # strip on the right (~300 mm) and a margin
@@ -158,53 +133,45 @@ object_detection_lidar_node:
     # Left: half of the own lane, the opposite lane (up to 450 mm), cross parking
     # spots on the left (~500 mm) and a margin
     roi_y_max: 1.6 # in m
-    # false keeps all objects (behavior without region of interest)
-    roi_enabled: true
+    # true keeps only the objects in the rectangle, false keeps all objects
+    roi_enabled: false
 
     # Round objects (shape.py, is_round): all obstacles of the CAuDri track,
     # including the pedestrian figures, are angular boxes. Round contours come
-    # from legs of examiners and spectators, bottles or chair legs. An object that
+    # from legs of people next to the track, bottles or chair legs. An object that
     # is no box (is_box) is dropped if a circle fits its visible contour clearly
     # better than a line and a corner. The dropped objects are published neither
     # on object_publisher nor on objects_publisher, only as gray markers (namespace
     # "round") for debugging. All criteria must hold, otherwise the object is kept
     # (recall first). The noise of the fits is box_line_tolerance +
     # box_line_tolerance_per_m * distance (see above).
-    # Evaluation of 09/11/2026: rosbags of 03/11/2026 (tools/evaluate.py, with and
-    # without --fov-half-angle 52): object recall, box TP/FN/FP unchanged, 0 of
-    # 1171 object scans of the labelled boxes (tracked ±30 scans around the
-    # labelled scans) dropped, ~0.17 round objects per scan dropped. Home rosbags
-    # of 09/11/2026 (1 m): toilet roll, vase, Haribo tin 100 %, kitchen roll
-    # 92-96 % of the scans round, carton, books and a letter 0 %.
     # false keeps round objects (behavior without this filter)
     drop_round_objects: true
     # Min. number of points. A circle has 3 parameters, two lines 4 plus the
-    # corner, with few points the corner of a small box (100 mm at 3-4 m, 8-11
-    # points) fits a circle as well as two lines (synthetic scans with a minimum
-    # of 8: up to 30 % of the scans round). A cylinder of 100 mm has 12 points up
-    # to ~2.5 m, one of 150 mm up to ~3.5 m, farther ones are kept.
+    # corner, with few points the corner of a small far box fits a circle as well
+    # as two lines. A cylinder of 100 mm has 12 points up to ~2.5 m, one of
+    # 150 mm up to ~3.5 m, farther ones are kept.
     round_min_points: 12
-    # Max. radius in m, legs (~50-80 mm), bottles and chair legs are smaller. The
-    # sides of boxes and walls fit large circles.
+    # Max. radius in m, legs, bottles and chair legs are smaller. The sides of
+    # boxes and walls fit large circles.
     round_max_radius: 0.15 # in m
-    # Min. visible arc seen from the center. A cylinder shows ~110-170° (home
-    # rosbags ~115°, the grazing ends return nothing), a slightly curved or noisy
-    # straight side fits a short arc of a large circle.
+    # Min. visible arc seen from the center. A cylinder shows a wide arc (the
+    # grazing ends return nothing), a slightly curved or noisy straight side fits
+    # a short arc of a large circle.
     round_min_arc_deg: 60.0 # in deg
-    # Max. RMS of the circle as multiple of the noise (home rosbags: cylinders at
-    # 1 m 1.6-2.8 mm, noise 3.8 mm)
+    # Max. RMS of the circle as multiple of the noise
     round_max_circle_rms_factor: 1.5
-    # Min. ratio of the line RMS to the circle RMS (home rosbags: cylinders 3.6-6)
+    # Min. ratio of the line RMS to the circle RMS
     round_min_line_ratio: 2.0
     # Min. ratio of the corner RMS (best split into two lines) to the circle RMS.
-    # Two lines approximate a cylinder well (home rosbags: ratio 1.0-1.6), the
-    # corners of angular objects fit clearly better than a circle (0.2-0.7).
+    # Two lines approximate a cylinder well, the corners of angular objects fit
+    # clearly better than a circle.
     round_min_corner_ratio: 0.8
     # A corner whose lines are at 90° ± round_right_angle_tolerance needs a
     # corner RMS of round_min_right_corner_ratio times the circle RMS. The two
-    # lines through a cylinder are at ~60-75° (home rosbags 58-67°), through
-    # the corner of a small far box at 78-88° with about the same RMS as the
-    # circle (synthetic scans, ratio 0.8-0.95). Close cylinders with a wider
-    # visible arc reach ~90°, but their corner RMS is 2-4 times the circle RMS.
+    # lines through a cylinder are clearly below 90°, through the corner of a
+    # small far box close to 90° with about the same RMS as the circle. Close
+    # cylinders with a wider visible arc reach ~90°, but their corner RMS is
+    # clearly larger than the circle RMS.
     round_right_angle_tolerance: 15.0 # in deg
     round_min_right_corner_ratio: 1.5

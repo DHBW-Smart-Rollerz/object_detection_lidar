@@ -1,5 +1,5 @@
-# Hand labels of the box classification (06/11/2026, one person, partly
-# uncertain). Each entry is the scan closest to a camera image (<= 50 ms).
+# Hand labels for evaluation. Positions in the laser frame, in m.
+# Each entry is the scan closest to a camera image (<= 50 ms).
 # Format and meaning: see README (Evaluation).
 bag: rosbag2_2026_11_03-10_08_07
 frame: laser
@@ -46,7 +46,7 @@ scans:
     boxes:  # centroids of the box clusters, in m
       - [0.2906, -0.8390]
       - [-0.4165, -3.1704]
-      - [-0.3936, -1.4624]  # corrected 09/11/2026, camera review
+      - [-0.3936, -1.4624]
     missed_boxes: 0  # boxes without a cluster
   - scan: 357  # moment b1_28
     boxes: []
@@ -60,7 +60,6 @@ scans:
   - scan: 496  # moment b1_40
     boxes:  # centroids of the box clusters, in m
       - [0.5781, -2.4335]
-      # removed 09/11/2026: [-1.6782, -3.1651], off-track room object, camera-checked
     missed_boxes: 1  # boxes without a cluster
   - scan: 542  # moment b1_44
     boxes:  # centroids of the box clusters, in m

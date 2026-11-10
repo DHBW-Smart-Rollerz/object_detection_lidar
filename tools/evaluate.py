@@ -126,7 +126,7 @@ def parse_override(text: str) -> tuple[str, object]:
 def override_params(
     params: PipelineParams, overrides: list[tuple[str, object]]
 ) -> PipelineParams:
-    """Replace single parameters, e.g. [("roi_enabled", False)].
+    """Replace single parameters, e.g. [("roi_enabled", True)].
 
     Integers are accepted for float parameters, otherwise the type has to match.
     """
@@ -465,7 +465,7 @@ def main(argv: list[str] | None = None) -> None:
         action="append",
         default=[],
         metavar="NAME=VALUE",
-        help="override a detection parameter, e.g. roi_enabled=false, repeatable",
+        help="override a detection parameter, e.g. roi_enabled=true, repeatable",
     )
     parser.add_argument("--csv", type=Path, help="also write the metrics to a CSV")
     args = parser.parse_args(argv)
